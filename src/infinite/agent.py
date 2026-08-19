@@ -1,0 +1,1049 @@
+"""The recursive agent loop.
+
+Each step is a stateless model call whose only user message is the register
+dump. Everything else — the past trajectory, earlier tool output — lives on
+disk, reachable through the tools.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+import logging
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import jsonschema
+
+from . import summary as summary_module
+from .bash_tool import BashSession
+from .config import (
+    REGISTER_LAYOUT,
+    RESULT_REGISTER,
+    STEP_ACTION_LABEL,
+    STEP_LABEL_LENGTH,
+    STEP_REGISTER,
+    STEP_THINKING_LABEL,
+    SUMMARY_REGISTER,
+    TARGET_REGISTER,
+    TRUNCATION_REGISTER,
+    Config,
+)
+from .firewall import Firewall
+from .model import Model
+from .prompt import build_system_message
+from .registers import RegisterFile
+from .tools import ToolBox, ToolResult
+from .trajectory import FORMAT_VERSION, Trajectory
+from .workspace import Workspace
+
+logger = logging.getLogger(__name__)
+
+NO_TOOL_CALL_NOTICE = (
+    "notice: the previous step made no tool call, so nothing changed. Use a tool to make "
+    "progress, and write your response file when the work is done."
+)
+NO_ACTION = "(no tool call)"
+CUT_OFF_ACTION = "(generation cut off before a tool call could run; nothing took effect)"
+#: Register 0 is a normal register — 224 chars in the short geometry — so this
+#: has to survive its own limit, the way 0.0.7b's truncation notice does.
+CUT_OFF_NOTICE = (
+    "notice: cut off at the token limit; the call you were writing did not run. "
+    "Write less per step — one file, or part of one."
+)
+CUT_OFF_PARTIAL = " The {ran} call(s) before it did run."
+
+
+def _thinking_text(blocks: list[dict[str, Any]]) -> str:
+    """Everything the model generated that was not a tool call, in order.
+
+    Thinking and prose are concatenated rather than chosen between, so the
+    register carries the step's reasoning whether or not thinking is enabled.
+    """
+    parts = []
+    for block in blocks:
+        kind = block.get("type")
+        if kind == "thinking":
+            parts.append(block.get("thinking", ""))
+        elif kind == "redacted_thinking":
+            parts.append("[redacted thinking]")
+        elif kind == "text":
+            parts.append(block.get("text", ""))
+    return "\n".join(part for part in parts if part)
+
+
+def _action_text(calls: list[Any], *, dropped: int = 0) -> str:
+    """The step's tool calls, as close to how the model wrote them as fits."""
+    if not calls:
+        return CUT_OFF_ACTION if dropped else NO_ACTION
+    text = "\n".join(
+        f"{call.name}({json.dumps(call.input, ensure_ascii=False, default=str)})"
+        for call in calls
+    )
+    if dropped:
+        text += "\n(one more call was cut off mid-way and did not run)"
+    return text
+
+
+def _complete_calls(response) -> tuple[list[Any], int]:
+    """The calls of a cut-off generation that are certainly whole.
+
+    A tool call block only exists because the one before it finished, so every
+    call but the last is complete and safe to run. 0.0.1 dropped all of them,
+    which was right when a step could generate 8192 tokens and truncation was
+    rare; at 0.0.7g's 1920 a quarter of generations are cut off, and across
+    three runs that rule discarded 56 finished calls.
+    """
+    calls = list(response.tool_calls)
+    return (calls[:-1], 1) if calls else ([], 0)
+
+
+def _step_text(thinking: str, action: str, half: int) -> tuple[str, bool]:
+    """Register 3: the whole step, each half cut to its own budget.
+
+    Cutting the halves separately rather than the joined text is the point: a
+    long deliberation can no longer push the record of what was actually done
+    out of the register, which is the half a next step cannot do without.
+    """
+    cut = len(thinking) > half or len(action) > half
+    text = STEP_THINKING_LABEL + thinking[:half] + STEP_ACTION_LABEL + action[:half]
+    return text, cut
+
+
+CONFIG_FIELDS = {field.name for field in dataclasses.fields(Config)}
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def _timing(
+    started_at: str,
+    clock: float,
+    generated: float,
+    flushed: float,
+    ran: float,
+    done: float,
+) -> dict[str, Any]:
+    """Where a step's wall-clock went: the model, the tools, and the waiting.
+
+    `summary_s` is not here. Since 0.0.7f the summariser of this step runs
+    alongside the *next* step's generation, so what it costs is not part of this
+    step's elapsed time; it is filled in when the thread is collected, and what
+    the loop actually paid for it is `summary_wait_s` — the tail of the previous
+    step's summariser that had not finished when this generation came back.
+    """
+    return {
+        "started_at": started_at,
+        "generation_s": round(generated - clock, 3),
+        "summary_wait_s": round(flushed - generated, 3),
+        "tools_s": round(ran - flushed, 3),
+        "total_s": round(done - clock, 3),
+    }
+
+
+@dataclass
+class AgentResult:
+    agent_id: str
+    ok: bool
+    response: Any
+    response_path: Path
+    trajectory_path: Path
+    steps: int
+    error: str | None = None
+    #: Written only when the run did not finish: what it was trying to do and
+    #: what it had established, for whoever picks it up.
+    handoff_path: Path | None = None
+
+
+class Agent:
+    def __init__(
+        self,
+        *,
+        config: Config,
+        workspace: Workspace,
+        model: Model,
+        instruction: str,
+        agent_id: str | None = None,
+        return_schema: dict[str, Any] | None = None,
+        depth: int = 0,
+        resume_from: int = 0,
+        can_spawn: bool = True,
+        seed: dict[int, str] | None = None,
+    ):
+        self.config = config
+        self.workspace = workspace
+        self.model = model
+        self.agent_id = agent_id or workspace.new_agent_id()
+        self.return_schema = return_schema
+        self.depth = depth
+        #: Steps already on record; a fresh run starts at 0.
+        self.step = resume_from
+        self.resumed = resume_from > 0
+        #: An agent at the depth floor cannot spawn, so it is not offered the
+        #: tool: 0.0.6's run had one such agent try anyway, five times over
+        #: thirty-four steps, because the refusal only lives in a register that
+        #: gets rewritten. A tool that cannot succeed should not be in the list.
+        self.can_spawn = can_spawn and depth < config.max_depth
+        self.summarizes = config.summary
+        #: Register 4's keeper: one tool-less call per step, not an agent.
+        self.summariser = summary_module.Summariser(config, model)
+
+        #: Why the last generation attempt failed, for the segment's `final`.
+        self._last_error = ""
+        #: The summariser runs on one thread of its own so that it overlaps the
+        #: next generation instead of standing between two steps: across
+        #: 0.0.7e's run it was 32% of the wall-clock of every agent in it.
+        self._summary_pool: ThreadPoolExecutor | None = None
+        #: The step whose record is written but whose summary has not landed
+        #: yet: (record, future). At most one, because it is collected before
+        #: the next one is started.
+        self._pending: tuple[dict[str, Any], Future] | None = None
+
+        self.registers = RegisterFile(config)
+        #: Registers the agent starts its first step with already filled — for
+        #: an agent whose whole input is data the caller already has, which can
+        #: then answer on step one instead of paging a file in through a
+        #: register.
+        self.seed = dict(seed or {})
+        for register_id, value in self.seed.items():
+            self.registers.store(register_id, value)
+        self.instruction = instruction
+        self.instruction_path = workspace.instruction_path(self.agent_id)
+        self.instruction_path.write_text(instruction, encoding="utf-8")
+        self.response_path = workspace.response_path(self.agent_id)
+        self.trajectory = Trajectory(
+            workspace.trajectory_path(self.agent_id), resume=self.resumed
+        )
+        self.firewall = Firewall.build(
+            workspace.root, config.readable_dirs, enabled=config.firewall
+        )
+        #: Somewhere inside the workspace for temporary files, with the shell's
+        #: TMPDIR and caches pointed at it. Its own directory per agent, so a
+        #: sub-agent's scratch does not appear in the parent's workspace.
+        self.scratch = workspace.scratch_path(self.agent_id)
+        self.bash = BashSession(
+            cwd=str(workspace.root),
+            timeout=config.bash_timeout,
+            firewall=self.firewall,
+            env=workspace.environment(self.agent_id),
+        )
+        self.tools = ToolBox(self)
+        #: What one generation of this run can cost, at its fullest. Recorded in
+        #: the trajectory and refused here if the config set a ceiling: the
+        #: scaffold had grown from 0.0.6's ~22k tokens a step to 0.0.7f's ~45k
+        #: without anything ever adding the two halves up.
+        self.context = self._context_budget()
+        limit = config.max_context_tokens
+        if limit is not None and self.context["total_tokens"] > limit:
+            raise ValueError(
+                f"one generation is up to {self.context['total_tokens']} tokens "
+                f"({self.context['input_tokens']} in, {self.context['output_tokens']} out), "
+                f"over the max_context_tokens of {limit}: "
+                f"{self.context['fixed_chars']} chars of system message and tool schemas "
+                f"(the return schema is part of it, and a shorter one is the usual fix) "
+                f"and {self.context['dump_chars']} chars of registers"
+            )
+
+    def _context_budget(self) -> dict[str, int]:
+        """The size of the largest request this agent can make.
+
+        The two halves are measured as they will actually be sent: the rendered
+        system message and the rendered tool schemas, which do not change, and
+        the register dump at every register's limit, which is the ceiling rather
+        than the average.
+        """
+        fixed = len(self.system_message()) + len(
+            json.dumps(self.tools.specs(), ensure_ascii=False)
+        )
+        return self.config.context_tokens(fixed)
+
+    # --- context -------------------------------------------------------
+    def system_message(self) -> str:
+        return build_system_message(
+            config=self.config,
+            workspace_root=str(self.workspace.root),
+            instruction_file=self.workspace.display(self.instruction_path),
+            response_file=self.workspace.display(self.response_path),
+            trajectory_file=self.workspace.display(self.trajectory.path),
+            return_schema=self.return_schema,
+            firewall=self.firewall.describe(),
+            summarizes=self.summarizes,
+            can_spawn=self.can_spawn,
+            instruction_register=self.instruction_register,
+            scratch_dir=self.workspace.display(self.scratch),
+        )
+
+    @property
+    def instruction_register(self) -> int | None:
+        """The register holding a *complete* copy of the instruction, if any.
+
+        A copy that did not fit is not one the agent can rely on, so it is not
+        advertised: that agent is told to read the file like any other.
+        """
+        for register_id in self.seed:
+            if self.registers.values[register_id] == self.instruction:
+                return register_id
+        return None
+
+    # --- resuming ------------------------------------------------------
+    @classmethod
+    def resume(
+        cls,
+        *,
+        workspace: Workspace,
+        model: Model,
+        agent_id: str,
+        overrides: dict[str, Any] | None = None,
+        upgrade_registers: bool = False,
+    ) -> "Agent":
+        """Rebuild an agent from its trajectory, ready for another segment.
+
+        The stored config is authoritative — the register geometry has to match
+        the values being restored — so `overrides` is for budgets and the model
+        only. Register state comes from the run's last `final` record; if the
+        process was killed before writing one, it falls back to the last step's
+        `registers_before`, which costs one re-done step and never invents state.
+        """
+        path = workspace.trajectory_path(agent_id)
+        records = Trajectory(path, resume=True).read()
+        header = next((r for r in records if r.get("role") == "user"), None)
+        if header is None:
+            raise ValueError(f"{path} has no header record; nothing to resume")
+
+        stored = {k: v for k, v in (header.get("config") or {}).items() if k in CONFIG_FIELDS}
+        if isinstance(stored.get("readable_dirs"), list):
+            stored["readable_dirs"] = tuple(stored["readable_dirs"])
+        relayout = cls._check_layout(stored, upgrade_registers)
+        config = dataclasses.replace(Config(**stored), **(overrides or {}))
+
+        steps = [r for r in records if r.get("role") == "assistant"]
+        if not steps:
+            raise ValueError(f"{path} has no steps; start a fresh run instead")
+        last_step = max(r.get("step", 0) for r in steps)
+        # Continue past the closing `final` marker rather than reusing its
+        # number, so no two steps in the file share one.
+        next_step = max(r.get("step", 0) for r in records)
+
+        finals = [r for r in records if r.get("role") == "final"]
+        if finals and isinstance(finals[-1].get("registers"), list):
+            values, source = finals[-1]["registers"], "final"
+        else:
+            values, source = steps[-1].get("registers_before", []), "last-step"
+
+        agent = cls(
+            config=config,
+            workspace=workspace,
+            model=model,
+            instruction=header.get("content", ""),
+            agent_id=agent_id,
+            return_schema=header.get("return_schema"),
+            depth=header.get("depth", 0),
+            resume_from=next_step,
+        )
+        for i, value in enumerate(values[: config.num_registers]):
+            agent.registers.values[i] = value
+        if relayout:
+            # Under every earlier layout register 4 held something that is not a
+            # summary. Carrying it across would present it as one; the next step
+            # writes a real summary anyway.
+            agent.registers.values[SUMMARY_REGISTER] = ""
+        agent._resume_note = {
+            "resumed_from_step": last_step,
+            "registers_from": source,
+            "previous_error": finals[-1].get("error") if finals else None,
+            **({"registers_relayout": relayout} if relayout else {}),
+        }
+        return agent
+
+    @staticmethod
+    def _check_layout(stored: dict[str, Any], upgrade: bool) -> dict[str, Any] | None:
+        """Refuse to resume a run whose registers meant something else.
+
+        Register values are restored by index, so what each special register
+        means has to be what it meant when the run was recorded. Every change to
+        that meaning bumps REGISTER_LAYOUT — 0.0.3 turned registers 2-4 from
+        scratch into the target and the automatic pair, 0.0.4 merged the pair
+        into register 3 and gave register 4 to the summary. Continuing across
+        one of those is a decision the operator makes, not one this code makes
+        for them.
+        """
+        defaults = Config()
+        # A trajectory recorded before layouts were numbered has no field to
+        # read, and it is by definition not this one.
+        was_layout = stored.get("register_layout", 0)
+        was_special = stored.get("num_special_registers", defaults.num_special_registers)
+        if was_layout == REGISTER_LAYOUT and was_special == defaults.num_special_registers:
+            return None
+        if not upgrade:
+            raise ValueError(
+                f"this run was recorded with register layout {was_layout or 'unnumbered'} "
+                f"({was_special} special registers) and this scaffold uses layout "
+                f"{REGISTER_LAYOUT} ({defaults.num_special_registers} special registers), "
+                "in which the same register numbers mean something else. Pass "
+                f"--upgrade-registers to continue anyway: register {TARGET_REGISTER}'s "
+                f"contents become the target, register {STEP_REGISTER} is overwritten with "
+                f"the next step, and register {SUMMARY_REGISTER} is cleared for the summary"
+            )
+        stored["num_special_registers"] = defaults.num_special_registers
+        stored["register_layout"] = REGISTER_LAYOUT
+        # This scaffold's wide tier, clamped into whatever geometry the run was
+        # recorded with: a small canvas must still bound the special registers.
+        normal = stored.get("max_register_length", defaults.max_register_length)
+        canvas = stored.get("max_canvas_length", defaults.max_canvas_length)
+        stored["max_special_length"] = max(
+            normal, min(defaults.max_special_length, canvas)
+        )
+        stored["max_step_half_length"] = max(
+            1, min(defaults.max_step_half_length, (canvas - STEP_LABEL_LENGTH) // 2)
+        )
+        return {
+            "register_layout": [was_layout, REGISTER_LAYOUT],
+            "num_special_registers": [was_special, defaults.num_special_registers],
+            "max_special_length": stored["max_special_length"],
+            "max_step_half_length": stored["max_step_half_length"],
+            "summary_register": "cleared",
+        }
+
+    # --- the loop ------------------------------------------------------
+    def run(self) -> AgentResult:
+        system = self.system_message()
+        tools = self.tools.specs()
+        segment_start = self.step
+        self._segment_started = time.monotonic()
+        if self.summarizes:
+            self._summary_pool = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix=f"summary-{self.agent_id}"
+            )
+
+        logger.info(
+            "agent %s: one generation is up to %d tokens (%d in, %d out)",
+            self.agent_id,
+            self.context["total_tokens"],
+            self.context["input_tokens"],
+            self.context["output_tokens"],
+        )
+
+        if self.resumed:
+            # A resumed run continues the same file, so the reader sees one
+            # history with a seam in it rather than two disconnected runs.
+            self.trajectory.append(
+                {
+                    "step": self.step,
+                    "role": "resume",
+                    "agent_id": self.agent_id,
+                    "started_at": _now(),
+                    "max_steps": self.config.max_steps,
+                    "config": vars(self.config),
+                    "context": self.context,
+                    "context_template": {
+                        "system": system,
+                        "tools": tools,
+                        "max_tokens": self.config.workspace_tokens,
+                    },
+                    "registers": self.registers.snapshot(),
+                    **getattr(self, "_resume_note", {}),
+                }
+            )
+        else:
+            # The user message is the first step of the trajectory even though it
+            # is not put in the context directly: the model reads it from a file.
+            # The header also holds the half of the model input that never changes.
+            self.trajectory.append(
+                {
+                    "format_version": FORMAT_VERSION,
+                    "step": 0,
+                    "role": "user",
+                    "agent_id": self.agent_id,
+                    "depth": self.depth,
+                    "started_at": _now(),
+                    "content": self.instruction,
+                    "workspace_root": str(self.workspace.root),
+                    "instruction_file": self.workspace.display(self.instruction_path),
+                    "response_file": self.workspace.display(self.response_path),
+                    "trajectory_file": self.workspace.display(self.trajectory.path),
+                    "return_schema": self.return_schema,
+                    "config": vars(self.config),
+                    "context": self.context,
+                    "seed_registers": sorted(self.seed),
+                    "firewall": {
+                        "enabled": self.firewall.enabled,
+                        "writable": str(self.firewall.workspace),
+                        "readable": [str(p) for p in self.firewall.readable],
+                    },
+                    "context_template": {
+                        "system": system,
+                        "tools": tools,
+                        "max_tokens": self.config.workspace_tokens,
+                    },
+                }
+            )
+            self.registers.store(TRUNCATION_REGISTER, "False")
+
+        try:
+            while self._within_budget(segment_start):
+                self.step += 1
+                self.workspace.record_step(self.agent_id)
+                registers_before = self.registers.snapshot()
+                messages = [
+                    {
+                        "role": "user",
+                        "content": self.registers.render(
+                            step=self.step,
+                            max_steps=self._budget_end(segment_start),
+                            run=self.workspace.spent(),
+                        ),
+                    }
+                ]
+
+                started_at, clock = _now(), time.monotonic()
+                response = self._generate(system, tools, messages)
+                if response is None:
+                    # Every attempt failed. The step never happened, so it is not
+                    # recorded; the segment ends where it stood and `--resume`
+                    # picks it up from the registers on disk — including the
+                    # summary of the step before, which was being written while
+                    # this generation was failing.
+                    self._collect_summary()
+                    self.step -= 1
+                    return self._result(
+                        ok=False,
+                        response=None,
+                        error=f"generation failed at step {self.step + 1}: {self._last_error}",
+                    )
+                generated = time.monotonic()
+                # The previous step's summary was written during this
+                # generation; take delivery of it now that the generation this
+                # step needed it *after* is over.
+                self._collect_summary()
+                flushed = time.monotonic()
+
+                record: dict[str, Any] = {
+                    "step": self.step,
+                    "role": "assistant",
+                    "agent_id": self.agent_id,
+                    "model_input": {
+                        "messages": messages,
+                        "max_tokens": self.config.workspace_tokens,
+                    },
+                    "registers_before": registers_before,
+                    "content": response.blocks,
+                    "stop_reason": response.stop_reason,
+                    "usage": response.usage,
+                }
+
+                # The step's own reasoning and action are handed back to the next
+                # step: without this the model has no memory of what it just did.
+                thinking = _thinking_text(response.blocks)
+                cut_off = response.stop_reason == "max_tokens"
+                calls, dropped = (
+                    _complete_calls(response) if cut_off else (response.tool_calls, 0)
+                )
+                action = _action_text(calls, dropped=dropped)
+                text, clipped = _step_text(
+                    thinking, action, self.config.max_step_half_length
+                )
+                self.registers.store(STEP_REGISTER, text, truncated=clipped)
+
+                if cut_off:
+                    # The call the generation was cut in the middle of may be
+                    # half-written, so it is dropped; the ones it had already
+                    # finished are run, and the model continues next step.
+                    self.registers.store(TRUNCATION_REGISTER, "True")
+                    results = self._run_tools(calls)
+                    if results:
+                        record["observation"] = {"results": [r.record for r in results]}
+                    ran = time.monotonic()
+                    notice = CUT_OFF_NOTICE.format(register=STEP_REGISTER)
+                    if results:
+                        notice += CUT_OFF_PARTIAL.format(ran=len(results))
+                    self.registers.store(RESULT_REGISTER, notice)
+                    record["timing"] = _timing(
+                        started_at, clock, generated, flushed, ran, time.monotonic()
+                    )
+                    self._close_step(record, thinking, action, results, cut_off=True)
+                    logger.info(
+                        "agent %s step %d: generation truncated (%d of %d calls ran)",
+                        self.agent_id, self.step, len(results), len(calls) + dropped,
+                    )
+                    continue
+
+                self.registers.store(TRUNCATION_REGISTER, "False")
+                results = self._run_tools(calls)
+                if results:
+                    record["observation"] = {"results": [r.record for r in results]}
+                ran = time.monotonic()
+
+                # Read the response before summarising: a run that is over does
+                # not need a summary handed to a step that will never happen.
+                done, value, error = self.read_response()
+                record["timing"] = _timing(
+                    started_at, clock, generated, flushed, ran, time.monotonic()
+                )
+                self._close_step(
+                    record, thinking, action, results, cut_off=False, last=done
+                )
+
+                if done:
+                    logger.info(
+                        "agent %s finished in %d steps", self.agent_id, self.step
+                    )
+                    return self._result(ok=True, response=value)
+                if error:
+                    self.registers.store(RESULT_REGISTER, error)
+                elif response.stop_reason == "refusal":
+                    self.registers.store(
+                        RESULT_REGISTER, "notice: the previous generation was declined"
+                    )
+                elif not response.tool_calls:
+                    self.registers.store(RESULT_REGISTER, NO_TOOL_CALL_NOTICE)
+
+            # Kept short on purpose: this lands in a parent's register, which
+            # truncates, and in the spawn payload.
+            error = (
+                f"no valid response in {self.step - segment_start} steps "
+                f"(expected {self.workspace.display(self.response_path)})"
+            )
+            logger.warning("agent %s gave up: %s", self.agent_id, error)
+            self._collect_summary()
+            return self._result(ok=False, response=None, error=error)
+        finally:
+            # Nothing is left in flight: a summary still being written when the
+            # segment ends is waited for and recorded, so the `final` a resume
+            # reads holds the register file as it really stood.
+            self._collect_summary()
+            if self._summary_pool is not None:
+                self._summary_pool.shutdown(wait=True)
+                self._summary_pool = None
+            self.bash.close()
+
+    def _within_budget(self, segment_start: int) -> bool:
+        """The budget is per segment, so a resumed run gets a fresh allowance."""
+        if self.config.max_steps is None:
+            return True
+        return self.step - segment_start < self.config.max_steps
+
+    def _generate(self, system, tools, messages):
+        """The step's own model call, retried rather than fatal.
+
+        A run of a thousand steps meets a transient API error eventually, and a
+        crash there costs everything not already on disk — 0.0.7b lost a run that
+        was two thirds of the way through a reconstruction to one `Overloaded`.
+        """
+        delay = self.config.step_retry_backoff
+        deadline = time.monotonic() + self.config.step_retry_seconds
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                return self.model.generate(
+                    system=system,
+                    tools=tools,
+                    messages=messages,
+                    max_tokens=self.config.workspace_tokens,
+                )
+            except Exception as exc:
+                self._last_error = f"{type(exc).__name__}: {exc}"
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    self._last_error = (
+                        f"{self._last_error} (gave up after {attempt} attempts over "
+                        f"{self.config.step_retry_seconds / 60:.0f} min)"
+                    )
+                    logger.warning(
+                        "agent %s step %d: generation attempt %d failed (%s)",
+                        self.agent_id, self.step, attempt, self._last_error[:240],
+                    )
+                    return None
+                logger.warning(
+                    "agent %s step %d: generation attempt %d failed (%s); retrying in %.0fs"
+                    " (%.0f min of patience left)",
+                    self.agent_id, self.step, attempt, self._last_error[:200],
+                    min(delay, left), left / 60,
+                )
+                time.sleep(min(delay, left))
+                delay = min(delay * 2, self.config.step_retry_backoff_max)
+
+    def _budget_end(self, segment_start: int) -> int | None:
+        """The last step number this segment may reach, or None for no cap."""
+        if self.config.max_steps is None:
+            return None
+        return segment_start + self.config.max_steps
+
+    def _run_tools(self, calls: list[Any]) -> list[ToolResult]:
+        """Every call of the step, in the model's order — spawns side by side.
+
+        A step is one generation however many calls it holds (0.0.7e), and the
+        scaffold asks the agent to batch on exactly that argument. For `spawn`
+        the argument was false: 0.0.7e's root asked for five children in one
+        step and the scaffold ran them one after another, so a step that should
+        have cost the slowest child cost the sum of all five — 16.3 hours of a
+        17.5-hour run, and the children were writing different files.
+
+        Only a run of two or more consecutive `spawn` calls goes concurrent.
+        Anything else keeps the order the model wrote, because a `bash` before a
+        `spawn` may well be what the child is meant to find on disk, and the
+        shell is one session that cannot run two commands at once anyway.
+        """
+        results: list[ToolResult] = []
+        index, total = 0, len(calls)
+        while index < total:
+            end = index
+            while end < total and calls[end].name == "spawn":
+                end += 1
+            if end - index > 1:
+                results.extend(self._run_spawn_group(calls[index:end]))
+                index = end
+            else:
+                results.append(self._run_tool(calls[index]))
+                index += 1
+        return results
+
+    def _run_spawn_group(self, calls: list[Any]) -> list[ToolResult]:
+        """Children of one step, started together and applied in order.
+
+        `spawn_workers` is the ceiling: a fan-out of five puts five agents and
+        five summarisers on the API at once, and an overloaded API is what
+        0.0.7c had to teach the scaffold to survive.
+        """
+        workers = min(len(calls), self.config.spawn_workers)
+        logger.info(
+            "agent %s step %d: %d spawns in one step, %d at a time",
+            self.agent_id,
+            self.step,
+            len(calls),
+            workers,
+        )
+        with ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix=f"spawn-{self.agent_id}"
+        ) as pool:
+            results = list(pool.map(self._execute_tool, calls))
+        # Registers are written afterwards, in the order the model asked, so a
+        # concurrent step leaves the register file exactly where a serial one
+        # would — register 0 holds the last call of the step, not the first
+        # child to finish.
+        for result in results:
+            self._store_result(result)
+        return results
+
+    def _execute_tool(self, call) -> ToolResult:
+        """Run one call and time it, touching no register."""
+        clock = time.monotonic()
+        result = self.tools.execute(call)
+        result.record["duration_s"] = round(time.monotonic() - clock, 4)
+        return result
+
+    def _run_tool(self, call) -> ToolResult:
+        result = self._execute_tool(call)
+        self._store_result(result)
+        return result
+
+    def _store_result(self, result: ToolResult) -> None:
+        status = result.status
+        if result.register_id is not None:
+            cut = self.registers.store(result.register_id, result.payload)
+            if cut:
+                # 0.0.7a's run read 190 lines of a file into a 512-char register,
+                # saw the first 512, decided it had not seen enough, and read a
+                # different range — for 435 steps. The dump tagged the register
+                # `truncated` and that was not enough: register 0 now says what
+                # was lost and where the rest is, in the one place the agent
+                # always reads.
+                status = self._truncation_notice(result, status)
+        self.registers.store(RESULT_REGISTER, status)
+        logger.info(
+            "agent %s step %d: %s -> %s",
+            self.agent_id,
+            self.step,
+            result.name,
+            status.splitlines()[0] if status else "",
+        )
+
+    def _truncation_notice(self, result: ToolResult, status: str) -> str:
+        """What register 0 says when a result did not fit its destination.
+
+        The numbers, and then the two ways out: the canvas is the register sized
+        for content, and the result file holds the whole thing either way.
+        """
+        register_id = result.register_id
+        kept = self.registers.limit(register_id)
+        whole = len(result.payload)
+        canvas = self.config.canvas_id
+        # Short, because register 0 is a normal register and this has to survive
+        # its own limit. The path stays first: it is the thing to act on.
+        remedy = (
+            f"canvas (register {canvas}, {self.config.max_canvas_length})"
+            if register_id != canvas
+            else "`load(start=N)` in pieces"
+        )
+        return (
+            f"{status}\nCUT: {whole} chars, register {register_id} kept {kept}. "
+            f"You are not seeing all of it — for the rest use the {remedy}, "
+            f"or load the file above. Re-running the command shows no more."
+        )
+
+    def _result(self, *, ok: bool, response: Any, error: str | None = None) -> AgentResult:
+        handoff = None if ok else self._write_handoff(error)
+        self.trajectory.append(
+            {
+                "step": self.step + 1,
+                "role": "final",
+                "agent_id": self.agent_id,
+                "ok": ok,
+                "response_file": self.workspace.display(self.response_path),
+                "response": response,
+                "error": error,
+                "ended_at": _now(),
+                "segment_duration_s": round(
+                    time.monotonic() - getattr(self, "_segment_started", time.monotonic()), 3
+                ),
+                "registers": self.registers.snapshot(),
+            }
+        )
+        return AgentResult(
+            agent_id=self.agent_id,
+            ok=ok,
+            response=response,
+            response_path=self.response_path,
+            trajectory_path=self.trajectory.path,
+            steps=self.step,
+            error=error,
+            handoff_path=handoff,
+        )
+
+    def _write_handoff(self, error: str | None) -> Path:
+        """The account an unfinished agent leaves behind.
+
+        Three children in a row at a small geometry ran out of steps, and each
+        parent was told only that — so it re-dispatched the whole job, and the
+        seventy steps of reading the child had done were spent again. What the
+        child knew is in its registers: the target it set itself, the summary of
+        what it established, and the step it was on.
+        """
+        path = self.workspace.handoff_path(self.agent_id)
+        path.write_text(
+            json.dumps(
+                {
+                    "agent_id": self.agent_id,
+                    "steps": self.step,
+                    "error": error,
+                    "target": self.registers.values[TARGET_REGISTER],
+                    "summary": self.registers.values[SUMMARY_REGISTER],
+                    "last_step": self.registers.values[STEP_REGISTER],
+                    "instruction_file": self.workspace.display(self.instruction_path),
+                    "trajectory_file": self.workspace.display(self.trajectory.path),
+                    "resume_with": f'spawn(resume="{self.agent_id}", max_steps=N)',
+                },
+                ensure_ascii=False,
+                indent=1,
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    # --- response ------------------------------------------------------
+    def read_response(self) -> tuple[bool, Any, str | None]:
+        """(finished, value, error) — the error goes to register 0 as feedback."""
+        name = self.workspace.display(self.response_path)
+        if not self.response_path.exists():
+            return False, None, None
+        try:
+            raw = self.response_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return False, None, f"error: could not read {name}: {exc}"
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            return False, None, (
+                f"error: {name} is not valid JSON ({exc}); rewrite the whole file"
+            )
+        if self.return_schema is not None:
+            try:
+                jsonschema.validate(value, self.return_schema)
+            except jsonschema.exceptions.SchemaError as exc:
+                return False, None, f"error: the required schema is itself invalid: {exc.message}"
+            except jsonschema.ValidationError as exc:
+                location = "/".join(str(part) for part in exc.absolute_path) or "(root)"
+                return False, None, (
+                    f"error: {name} does not match the required schema at {location}: "
+                    f"{exc.message}; rewrite the whole file"
+                )
+        return True, value, None
+
+    # --- the summary ---------------------------------------------------
+    def _close_step(
+        self,
+        record: dict[str, Any],
+        thinking: str,
+        action: str,
+        results: list[ToolResult],
+        *,
+        cut_off: bool,
+        last: bool = False,
+    ) -> None:
+        """End a step: hand it to the summariser, and hold its record until then.
+
+        The summary of step N is written *while step N+1 is being generated*,
+        and lands in register 4 in time for the dump of step N+2. Nothing is
+        lost by that: register 3 always holds the step immediately before, so
+        the pair the agent reads — the summary through N, register 3 = step N+1
+        — still covers every step of the run, with the overlap the two used to
+        have taken out of it rather than a gap put in.
+
+        What it buys is the wall-clock. Across 0.0.7e's 1,368 steps the
+        summariser was 5.3 of the 16.3 hours the agents spent, all of it with
+        the run standing still; run alongside a generation that takes twice as
+        long, it costs nothing at all.
+
+        The record waits for its summary so the trajectory keeps saying what it
+        always said — one line per step, carrying the summary that followed it.
+        """
+        if not self.summarizes or last:
+            # A run that is over does not need a summary handed to a step that
+            # will never happen.
+            self.trajectory.append(record)
+            return
+
+        limit = self.registers.limit(SUMMARY_REGISTER)
+        arguments = dict(
+            agent_id=self.agent_id,
+            step=self.step,
+            instruction=self.instruction,
+            target=self.registers.values[TARGET_REGISTER],
+            previous_summary=self.registers.values[SUMMARY_REGISTER],
+            thinking=thinking,
+            action=action,
+            observations=summary_module.describe_observations(
+                results, self.config.max_step_half_length
+            ),
+            cut_off=cut_off,
+            limit=limit,
+        )
+        assert self._summary_pool is not None
+        self._pending = (record, self._summary_pool.submit(self._summarise, arguments))
+
+    def _summarise(self, arguments: dict[str, Any]) -> tuple[Any, float]:
+        """The summariser call itself, on its own thread. Touches no register.
+
+        One tool-less generation, retried whole if what comes back does not fit
+        and truncated after the last attempt — the rules live in `Summariser`.
+        What is given is one summary and one step, never the history, so the
+        cost per step is flat however long the run gets.
+        """
+        clock = time.monotonic()
+        update = self.summariser.update(**arguments)
+        return update, time.monotonic() - clock
+
+    def _collect_summary(self) -> None:
+        """Take delivery of the pending summary, write register 4, file the step.
+
+        A summariser that fails leaves the old summary standing. Losing the
+        run's memory over one bad call would be a far worse outcome than a
+        summary that is one step out of date, and the step it missed is still in
+        register 3 and in the trajectory.
+        """
+        if self._pending is None:
+            return
+        record, future = self._pending
+        self._pending = None
+        step = record.get("step", self.step)
+        try:
+            update, seconds = future.result()
+        except Exception as exc:  # nothing about the summary may end a run
+            logger.warning(
+                "agent %s step %d: summariser thread failed (%s: %s)",
+                self.agent_id, step, type(exc).__name__, exc,
+            )
+            record.setdefault("timing", {})["summary_s"] = 0.0
+            record["summary"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            self.trajectory.append(record)
+            return
+
+        if update.ok:
+            # The truncation flag comes from the summariser: a cut that happened
+            # before the value got here is one the length alone cannot report.
+            self.registers.store(
+                SUMMARY_REGISTER, update.summary, truncated=update.truncated
+            )
+            if update.truncated:
+                logger.warning(
+                    "agent %s step %d: summary truncated to %d chars after %d attempts",
+                    self.agent_id,
+                    step,
+                    update.limit,
+                    len(update.attempts),
+                )
+        else:
+            logger.warning(
+                "agent %s step %d: summary not updated (%s)",
+                self.agent_id,
+                step,
+                update.error,
+            )
+        record.setdefault("timing", {})["summary_s"] = round(seconds, 3)
+        record["summary"] = update.record()
+        self.trajectory.append(record)
+
+    # --- recursion -----------------------------------------------------
+    def resume_child(self, agent_id: str, max_steps: int | None = None) -> AgentResult:
+        """Give an unfinished child more steps, with its registers as they were.
+
+        The plumbing is `--resume`, which has existed since 0.0.2 for a human at
+        a terminal; what 0.0.7h adds is that a parent can reach it. A child that
+        ran out is a process to continue, not work to redo — and at a small
+        geometry, where a step buys less, running out is ordinary.
+        """
+        overrides = {} if max_steps is None else {"max_steps": max_steps}
+        child = Agent.resume(
+            workspace=self.workspace,
+            model=self.model,
+            agent_id=agent_id,
+            overrides=overrides,
+        )
+        logger.info(
+            "agent %s step %d: resuming %s from step %d (%s)",
+            self.agent_id, self.step, agent_id, child.step,
+            "no step cap" if child.config.max_steps is None
+            else f"{child.config.max_steps} more steps",
+        )
+        return child.run()
+
+    def spawn_child(
+        self,
+        prompt: str,
+        return_schema: dict[str, Any],
+        max_steps: int | None = None,
+    ) -> AgentResult:
+        """A fresh agent in this workspace, with a budget its parent may set.
+
+        Until 0.0.7f a child inherited the whole of its parent's `max_steps`,
+        and there was no way to say otherwise: 0.0.7e's root asked for a digest
+        of one part of a document and got a child that spent 278 steps and six
+        and a half hours on it, invisibly, because nothing bounded it and
+        nothing reported on it until it returned. A parent that can say how big
+        a job it thinks it is asking for gets an error in an hour instead.
+        """
+        config = self.config
+        if max_steps is not None:
+            config = dataclasses.replace(config, max_steps=max_steps)
+        child = Agent(
+            config=config,
+            workspace=self.workspace,
+            model=self.model,
+            instruction=prompt,
+            return_schema=return_schema,
+            depth=self.depth + 1,
+        )
+        logger.info(
+            "agent %s step %d: spawning %s at depth %d (%s)",
+            self.agent_id,
+            self.step,
+            child.agent_id,
+            child.depth,
+            "no step cap" if config.max_steps is None else f"{config.max_steps} steps",
+        )
+        return child.run()

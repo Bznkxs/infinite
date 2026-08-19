@@ -1,0 +1,33 @@
+[project]
+name = "infinite"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Yufeng Du", email = "yufengd4@illinois.edu" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "anthropic>=0.121.0",
+    "claude-agent-sdk>=0.2.110",
+    "jsonschema>=4.26.0",
+    "openai-codex>=0.1.0b2",
+    "python-dotenv>=1.2.2",
+]
+
+[project.scripts]
+infinite = "infinite.main:main"
+infinite-viewer = "infinite.viewer.server:main"
+
+[build-system]
+requires = ["uv_build>=0.11.24,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

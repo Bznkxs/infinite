@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InfiniteAgent — trajectories</title>
+<style>
+  :root {
+    --bg: #f7f7f6; --panel: #ffffff; --ink: #1a1a19; --muted: #6b6b66;
+    --line: #e2e2dd; --accent: #3b5bdb; --accent-soft: #edf0fd;
+    --user: #eef2f7; --tool: #f4f2ec; --think: #f6f4f9; --err: #b02020;
+    --ok: #2f7a45; --code-bg: #f1f0ec;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16171a; --panel: #1d1e22; --ink: #e6e6e3; --muted: #9a9a94;
+      --line: #2e3037; --accent: #8fa5ff; --accent-soft: #24283a;
+      --user: #22252c; --tool: #23241f; --think: #241f28; --err: #ff8a8a;
+      --ok: #7fd39b; --code-bg: #131417;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); font-size: 14px; line-height: 1.55;
+  }
+  #app { display: flex; height: 100vh; }
+
+  /* --- sidebar --- */
+  #sidebar {
+    width: 290px; flex: 0 0 290px; border-right: 1px solid var(--line);
+    background: var(--panel); overflow-y: auto; padding: 14px 0 40px;
+  }
+  #sidebar h1 { font-size: 13px; margin: 0 14px 2px; letter-spacing: .04em; text-transform: uppercase; }
+  #sidebar .root { font-family: var(--mono); font-size: 11px; color: var(--muted); margin: 0 14px 14px; word-break: break-all; }
+  .ws { margin: 0 0 10px; }
+  .ws > .name {
+    font-family: var(--mono); font-size: 12px; padding: 4px 14px;
+    color: var(--muted); border-top: 1px solid var(--line);
+  }
+  .agent {
+    display: block; width: 100%; text-align: left; background: none; border: 0;
+    color: inherit; font: inherit; padding: 7px 14px 7px 20px; cursor: pointer;
+    border-left: 3px solid transparent;
+  }
+  .agent:hover { background: var(--accent-soft); }
+  .agent.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .agent .id { font-family: var(--mono); font-size: 12px; }
+  .agent .sub { color: var(--muted); font-size: 11.5px; display: block;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* --- main --- */
+  #main { flex: 1; overflow-y: auto; padding: 26px 32px 120px; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  .empty { color: var(--muted); margin-top: 20vh; text-align: center; }
+
+  h2.title { font-size: 20px; margin: 0 0 6px; font-family: var(--mono); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+  .chip {
+    font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 20px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+  }
+  .chip.ok { color: var(--ok); border-color: currentColor; }
+  .chip.bad { color: var(--err); border-color: currentColor; }
+  .banner {
+    border: 1px solid var(--err); color: var(--err); border-radius: 8px;
+    padding: 8px 12px; margin-bottom: 16px; font-size: 12.5px;
+  }
+
+  /* --- dialogue --- */
+  .turn { margin: 0 0 22px; }
+  .role {
+    font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 5px;
+  }
+  .bubble {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px;
+  }
+  .bubble.user { background: var(--user); }
+  .bubble.final { border-color: var(--accent); }
+  .bubble p { margin: 0 0 8px; white-space: pre-wrap; }
+  .bubble p:last-child { margin-bottom: 0; }
+
+  .steprule {
+    display: flex; align-items: center; gap: 10px; margin: 26px 0 8px;
+    color: var(--muted); font-family: var(--mono); font-size: 11.5px;
+  }
+  .steprule::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .seam {
+    display: flex; align-items: center; gap: 10px; margin: 28px 0 4px;
+    color: var(--accent); font-family: var(--mono); font-size: 11.5px;
+  }
+  .seam::before, .seam::after {
+    content: ""; flex: 1; height: 0; border-top: 1px dashed currentColor; opacity: .6;
+  }
+  .note { color: var(--muted); font-size: 12.5px; margin: -8px 0 16px; }
+
+  /* --- collapsibles --- */
+  details { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin: 8px 0; }
+  details > summary {
+    cursor: pointer; padding: 7px 12px; font-size: 12.5px; color: var(--muted);
+    font-family: var(--mono); list-style: none; display: flex; gap: 8px; align-items: baseline;
+  }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: "▸"; font-size: 10px; color: var(--muted); }
+  details[open] > summary::before { content: "▾"; }
+  details > summary:hover { color: var(--ink); }
+  details > .body { padding: 0 12px 12px; }
+  details.think { background: var(--think); }
+  details.ctx { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+  details.ctx > summary { color: var(--accent); }
+  .tag { font-size: 10.5px; padding: 0 6px; border-radius: 10px; border: 1px solid currentColor; }
+
+  pre {
+    background: var(--code-bg); border-radius: 6px; padding: 10px 12px; margin: 6px 0 0;
+    overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.45;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  pre.tall { max-height: 22em; overflow-y: auto; }
+  .label { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-top: 10px; }
+
+  /* --- tool calls --- */
+  .call { border: 1px solid var(--line); border-radius: 8px; background: var(--tool); margin: 8px 0; overflow: hidden; }
+  .call > .head {
+    display: flex; align-items: baseline; gap: 8px; padding: 8px 12px;
+    font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--line);
+  }
+  .call .tool { font-weight: 600; }
+  .call .reg { color: var(--muted); }
+  .call .link { margin-left: auto; background: none; border: 0; color: var(--accent);
+    font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; }
+  .call > .body { padding: 4px 12px 10px; }
+  .call .err { color: var(--err); font-family: var(--mono); font-size: 12px; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <h1>Trajectories</h1>
+    <div class="root" id="root"></div>
+    <div id="ws-list"></div>
+  </aside>
+  <main id="main"><div class="wrap"><p class="empty">Pick a run on the left.</p></div></main>
+</div>
+
+<script>
+const $ = (sel, el = document) => el.querySelector(sel);
+const el = (tag, attrs = {}, kids = []) => {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") node.className = v;
+    else if (k === "text") node.textContent = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v);
+  }
+  for (const kid of [].concat(kids)) if (kid) node.append(kid);
+  return node;
+};
+const n = (x) => (x ?? 0).toLocaleString();
+const secs = (s) => {
+  if (s == null) return "—";
+  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
+  return `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, "0")}s`;
+};
+const chars = (s) => `${n((s || "").length)} chars`;
+const firstLine = (s, max = 90) => {
+  const line = String(s ?? "").split("\n").find((l) => l.trim()) || "";
+  return line.length > max ? line.slice(0, max) + "…" : line;
+};
+const json = (v) => JSON.stringify(v, null, 2);
+
+/** A <details> block. `open` pre-expands; everything else stays click-to-expand. */
+function fold(summary, tags, bodyNodes, { open = false, cls = "" } = {}) {
+  const head = el("summary", {}, [el("span", { text: summary })]);
+  for (const t of [].concat(tags || [])) if (t) head.append(el("span", { class: "tag", text: t }));
+  const d = el("details", { class: cls }, [head, el("div", { class: "body" }, bodyNodes)]);
+  if (open) d.setAttribute("open", "");
+  return d;
+}
+const codeBlock = (text, tall = true) =>
+  el("pre", { class: tall ? "tall" : "", text: String(text ?? "") });
+
+// --- sidebar ----------------------------------------------------------
+let current = null;
+
+async function loadWorkspaces() {
+  const data = await (await fetch("/api/workspaces")).json();
+  $("#root").textContent = data.root;
+  const list = $("#ws-list");
+  list.replaceChildren();
+  if (!data.workspaces.length) {
+    list.append(el("p", { class: "root", text: "no trajectories found" }));
+    return;
+  }
+  for (const ws of data.workspaces) {
+    const group = el("div", { class: "ws" }, [el("div", { class: "name", text: ws.workspace })]);
+    for (const agent of ws.agents) {
+      const state = agent.running ? "running" : agent.ok ? "ok" : "failed";
+      const indent = agent.depth ? "· ".repeat(agent.depth) : "";
+      group.append(el("button", {
+        class: "agent",
+        "data-key": `${ws.workspace}/${agent.agent_id}`,
+        onclick: () => select(ws.workspace, agent.agent_id),
+      }, [
+        el("span", { class: "id", text: `${indent}${agent.agent_id}` }),
+        el("span", { class: "sub", text: `${agent.steps} steps · ${state} · `
+          + (agent.summarizer ? "summariser" : firstLine(agent.instruction, 60) || "—") }),
+      ]));
+    }
+    list.append(group);
+  }
+  markSelection();
+}
+
+function markSelection() {
+  for (const b of document.querySelectorAll(".agent"))
+    b.classList.toggle("on", b.dataset.key === current);
+}
+
+async function select(workspace, agent) {
+  current = `${workspace}/${agent}`;
+  location.hash = encodeURIComponent(current);
+  markSelection();
+  const url = `/api/trajectory?workspace=${encodeURIComponent(workspace)}&agent=${encodeURIComponent(agent)}`;
+  const data = await (await fetch(url)).json();
+  const wrap = $("#main .wrap");
+  wrap.replaceChildren(data.error ? el("p", { class: "banner", text: data.error }) : render(data));
+  $("#main").scrollTop = 0;
+}
+
+// --- rendering --------------------------------------------------------
+function render(t) {
+  const out = document.createDocumentFragment();
+  const cfg = t.config || {};
+  const state = t.running ? "running" : t.final?.ok ? "ok" : "failed";
+  // t.steps interleaves seam markers, which are not steps.
+  const taken = t.steps.filter((s) => s.role === "assistant").length;
+
+  out.append(el("h2", { class: "title", text: `${t.workspace}/${t.agent_id}` }));
+  const chips = el("div", { class: "chips" }, [
+    el("span", { class: `chip ${state === "ok" ? "ok" : state === "failed" ? "bad" : ""}`, text: state }),
+    el("span", { class: "chip", text: `${taken} steps` }),
+    el("span", { class: "chip", text: `depth ${t.depth}` }),
+    t.summarizer ? el("span", { class: "chip", text: "summariser" }) : null,
+    cfg.model && el("span", { class: "chip", text: cfg.model }),
+    cfg.effort && el("span", { class: "chip", text: `effort ${cfg.effort}` }),
+    el("span", { class: "chip", text: `${t.registers.count} registers` }),
+    el("span", { class: "chip", text: `${n(t.usage_total.input_tokens)} in / ${n(t.usage_total.output_tokens)} out` }),
+    t.duration_total_s ? el("span", { class: "chip", text: secs(t.duration_total_s) }) : null,
+    t.segments > 1 ? el("span", { class: "chip", text: `${t.segments} segments` }) : null,
+    el("span", { class: "chip", text: `format v${t.format_version ?? "0"}` }),
+  ]);
+  out.append(chips);
+
+  if (t.firewall) {
+    const fw = t.firewall;
+    const readable = fw.readable?.length ? fw.readable.join(", ") : "nothing outside it";
+    out.append(el("p", { class: "note", text: fw.enabled
+      ? `Firewall: writes confined to ${fw.writable}; also readable — ${readable}.`
+      : "Firewall off for this run: the agent could read and write anywhere." }));
+  }
+
+  if (t.reconstructed) {
+    out.append(el("p", { class: "banner", text:
+      "This trajectory predates format v1: it did not record the context. The system message, "
+      + "tool schemas and register dumps below were re-derived from the stored config and "
+      + "register snapshots — faithful except for per-register truncation flags." }));
+  }
+
+  out.append(contextTemplate(t));
+
+  // The instruction: the user's turn, even though the model reads it from a file.
+  out.append(el("div", { class: "turn" }, [
+    el("div", { class: "role", text: `user · ${t.instruction_file || "instruction"}` }),
+    el("div", { class: "bubble user" }, [el("p", { text: t.instruction })]),
+  ]));
+  if (t.return_schema)
+    out.append(fold("return schema", [], [codeBlock(json(t.return_schema))]));
+
+  for (const step of t.steps) {
+    if (step.role === "resume") out.append(renderSeam(step));
+    else if (step.role === "segment_end") out.append(renderSegmentEnd(step));
+    else out.append(renderStep(step, t));
+  }
+  if (t.final) out.append(renderFinal(t.final));
+  return out;
+}
+
+/** Where one segment gave up. */
+function renderSegmentEnd(entry) {
+  return el("div", { class: "turn" }, [
+    el("div", { class: "role", text: "segment ended" }),
+    el("div", { class: "bubble" }, [
+      el("p", { class: "err", text: entry.final?.error || "stopped" }),
+    ]),
+  ]);
+}
+
+/** Where it was picked back up. */
+function renderSeam(entry) {
+  const budget = entry.max_steps == null ? "no step cap" : `${entry.max_steps} more steps`;
+  const from = entry.registers_from === "last-step"
+    ? " · registers taken from the last step, which was re-done"
+    : "";
+  return el("div", { class: "seam" }, [
+    el("span", { text: `resumed after step ${entry.resumed_from_step ?? entry.step} — ${budget}${from}` }),
+  ]);
+}
+
+/** The static half of every request: shown once, at the top. */
+function contextTemplate(t) {
+  const tpl = t.context_template || {};
+  const tools = tpl.tools || [];
+  const body = [
+    el("div", { class: "label", text: "system message" }),
+    codeBlock(tpl.system),
+    el("div", { class: "label", text: `tools (${tools.length})` }),
+  ];
+  for (const tool of tools)
+    body.push(fold(tool.name, [`${chars(tool.description)}`], [
+      el("p", { text: tool.description }),
+      codeBlock(json(tool.input_schema)),
+    ]));
+  const r = t.registers;
+  const named = Object.entries(r.names || {})
+    .filter(([i]) => Number(i) < r.num_special)  // the canvas is named too, but is the agent's
+    .map(([i, name]) => `${i} ${name}`)
+    .join(", ");
+  body.push(
+    el("div", { class: "label", text: "user message, every step" }),
+    el("p", { text:
+      `The register dump — and nothing else. ${r.count} registers; 0–${r.num_special - 1} are `
+      + `system-written${named ? ` (${named})` : ""}, ${r.num_special}–${r.canvas_id - 1} are the `
+      + `agent's at ${n(r.max_register_length)} chars each, and ${r.canvas_id} is the canvas at `
+      + `${n(r.max_canvas_length)}.`
+      + (r.max_special_length && r.max_special_length !== r.max_register_length
+        ? ` The prose-holding special registers hold ${n(r.max_special_length)}`
+          + (r.max_step_half_length
+            ? `, and register 3 holds ${n(r.max_step_half_length)} of thinking plus `
+              + `${n(r.max_step_half_length)} of action.`
+            : ".")
+        : "") }),
+    codeBlock("[Registers]\n--- register <i> (<len>/<limit> chars[; name, canvas, special, truncated]) ---\n<value>", false),
+  );
+  return fold("Input context template — system message + tool schemas (identical every step)",
+    [`${chars(tpl.system)}`, `max_tokens ${n(tpl.max_tokens)}`], body, { cls: "ctx" });
+}
+
+function renderStep(step, t) {
+  const frag = document.createDocumentFragment();
+  const bits = [`step ${step.step}`];
+  if (step.stop_reason) bits.push(step.stop_reason);
+  const time = step.timing || {};
+  if (time.total_s != null)
+    // generation vs tools, because they are the two things you can trade off
+    // generation vs tools are the two halves of a step; the summary of this
+    // step runs alongside the next generation, so it is shown as what it cost
+    // (off the clock) and, when the next step had to wait for it, as the wait.
+    bits.push(`${secs(time.total_s)} (gen ${secs(time.generation_s)} · tools ${secs(time.tools_s)}`
+      + (time.summary_wait_s ? ` · waited ${secs(time.summary_wait_s)}` : "")
+      + (time.summary_s ? ` · summary ${secs(time.summary_s)} alongside` : "") + ")");
+  if (step.usage.output_tokens != null) bits.push(`${n(step.usage.output_tokens)} out`);
+  if (step.usage.input_tokens != null) bits.push(`${n(step.usage.input_tokens)} in`);
+  if (step.usage.cache_read_input_tokens) bits.push(`${n(step.usage.cache_read_input_tokens)} cached`);
+  frag.append(el("div", { class: "steprule", text: bits.join("  ·  ") }));
+
+  frag.append(modelInput(step, t));
+
+  if (step.truncated)
+    frag.append(el("p", { class: "banner", text:
+      "Generation cut off at the workspace limit — no tool ran, and register 1 flipped to \"True\"." }));
+
+  const bubble = el("div", { class: "bubble" });
+  for (const thought of step.thinking)
+    bubble.append(fold("thinking", [chars(thought)], [codeBlock(thought)], { cls: "think" }));
+  for (const text of step.text) bubble.append(el("p", { text }));
+  for (const call of step.tool_calls) bubble.append(renderCall(call, t));
+  if (!bubble.children.length) bubble.append(el("p", { text: "(no content)" }));
+
+  frag.append(el("div", { class: "turn" }, [
+    el("div", { class: "role", text: "assistant" }), bubble,
+  ]));
+  for (const orphan of step.orphan_results)
+    frag.append(fold("unmatched tool result", [], [codeBlock(json(orphan))]));
+  if (step.summary) frag.append(summaryUpdate(step.summary, t));
+  return frag;
+}
+
+/** What register 4 became after this step, and what the rewrite cost. */
+function summaryUpdate(update, t) {
+  const tags = [];
+  // Since v3 the summariser is one generation, retried whole when it overruns;
+  // pre-v3 it was a sub-agent and counted steps instead.
+  if (update.steps != null) tags.push(`${update.steps} steps`);
+  if (update.attempts?.length > 1) tags.push(`${update.attempts.length} attempts`);
+  if (update.chars != null) tags.push(`${n(update.chars)} chars`);
+  if (update.truncated) tags.push("truncated");
+  if (!update.ok) tags.push("failed");
+  const body = update.ok
+    ? [codeBlock(update.summary || "")]
+    : [el("p", { class: "err", text:
+        `${update.error || "no summary"} — register 4 keeps the summary it already had.` })];
+  if (update.attempts?.length > 1) {
+    body.push(el("p", { class: "note", text:
+      `attempt lengths: ${update.attempts.join(", ")} — target ${n(update.target_chars)}, `
+      + `register holds ${n(update.limit)}` }));
+  }
+  if (update.trajectory) {
+    const id = update.trajectory.replace(/^.*trajectory-(.*)\.jsonl$/, "$1");
+    body.push(el("button", { class: "link", text: `open summariser ${id} ↗`,
+      onclick: () => select(t.workspace, id) }));
+  }
+  return fold("summary → register 4", tags, body, { cls: "ctx" });
+}
+
+/** Exactly what was sent for this step: template + this step's messages. */
+function modelInput(step, t) {
+  const tpl = t.context_template || {};
+  const messages = step.model_input?.messages || [];
+  const dump = messages.map((m) => m.content).join("\n");
+  const total = (tpl.system || "").length + dump.length;
+  const tags = [`${n(total)} chars`, `${(tpl.tools || []).length} tools`];
+  if (step.model_input?.reconstructed) tags.push("reconstructed");
+
+  const body = [
+    el("div", { class: "label", text: "system" }),
+    fold("system message (unchanged)", [chars(tpl.system)], [codeBlock(tpl.system)]),
+    el("div", { class: "label", text: "tools" }),
+    fold(`${(tpl.tools || []).length} tool schemas (unchanged)`, [], [codeBlock(json(tpl.tools))]),
+    el("div", { class: "label", text: `messages (${messages.length})` }),
+  ];
+  for (const message of messages)
+    body.push(el("div", {}, [
+      el("div", { class: "label", text: `${message.role} · ${chars(message.content)}` }),
+      codeBlock(message.content),
+    ]));
+  return fold(`Model input for step ${step.step}`, tags, body, { cls: "ctx" });
+}
+
+function renderCall(call, t) {
+  const input = call.input || {};
+  const head = el("div", { class: "head" }, [
+    el("span", { class: "tool", text: call.name }),
+    el("span", { class: "reg", text:
+      input.register_id != null ? `→ register ${input.register_id}`
+      : call.name === "set_target" ? "→ target" : "" }),
+  ]);
+  if (call.result?.duration_s != null)
+    head.append(el("span", { class: "reg", text: secs(call.result.duration_s) }));
+  if (call.child_trajectory) {
+    const id = call.child_trajectory.replace(/^.*trajectory-(.*)\.jsonl$/, "$1");
+    head.append(el("button", { class: "link", text: `open sub-agent ${id} ↗`,
+      onclick: () => select(t.workspace, id) }));
+  }
+
+  const body = el("div", { class: "body" });
+  if (call.name === "bash") body.append(codeBlock(input.command, false));
+  else if (call.name === "load")
+    body.append(el("p", { text: `${input.path}  ·  from char ${n(input.start)}` }));
+  else if (call.name === "set") body.append(codeBlock(String(input.value ?? "")));
+  else if (call.name === "set_target") body.append(codeBlock(String(input.content ?? "")));
+  else if (call.name === "spawn")
+    body.append(codeBlock(input.prompt), fold("return schema", [], [codeBlock(json(input.return_schema))]));
+  else body.append(codeBlock(json(input)));
+  body.append(renderResult(call.result, call.name));
+  return el("div", { class: "call" }, [head, body]);
+}
+
+function renderResult(result, name) {
+  if (!result) return el("p", { class: "err", text: "no result recorded (generation was cut off)" });
+  if (result.error) return el("p", { class: "err", text: result.error });
+
+  if (name === "bash") {
+    const output = result.output || "";
+    return fold(`output — ${firstLine(output) || "(empty)"}`,
+      [chars(output), result.file || ""], [codeBlock(output)]);
+  }
+  if (name === "load") {
+    return fold(`${result.path} — ${n(result.display_length)} of ${n(result.length)} chars from ${n(result.start)}`,
+      [], [codeBlock(result.content)]);
+  }
+  if (name === "set" || name === "set_target")
+    return el("p", { class: "reg", text: result.status || "" });
+  if (name === "spawn") {
+    const content = result.content || {};
+    return fold(`sub-agent response — ${content.response?.file || ""}`,
+      [content.trajectory || ""], [codeBlock(json(content.response))]);
+  }
+  return fold("result", [], [codeBlock(json(result))]);
+}
+
+function renderFinal(final) {
+  const body = final.ok
+    ? [el("div", { class: "label", text: final.response_file }), codeBlock(json(final.response))]
+    : [el("p", { class: "err", text: final.error || "failed" })];
+  return el("div", { class: "turn" }, [
+    el("div", { class: "role", text: final.ok ? "final response" : "run failed" }),
+    el("div", { class: "bubble final" }, [
+      ...body,
+      fold("final registers", [], [codeBlock(json(final.registers))]),
+    ]),
+  ]);
+}
+
+// --- boot -------------------------------------------------------------
+(async function main() {
+  await loadWorkspaces();
+  const hash = decodeURIComponent(location.hash.slice(1));
+  const cut = hash.lastIndexOf("/");
+  if (cut > 0) select(hash.slice(0, cut), hash.slice(cut + 1));
+})();
+</script>
+</body>
+</html>
