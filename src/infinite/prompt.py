@@ -73,6 +73,8 @@ def build_system_message(
     instruction_register: int | None = None,
     scratch_dir: str | None = None,
     check: str | None = None,
+    goal: str | None = None,
+    write: str | None = None,
     facts_file: str | None = None,
     reg_dir: str | None = None,
 ) -> str:
@@ -112,12 +114,23 @@ def build_system_message(
         f"{RESULT_REGISTER}-{STEP_REGISTER} are all the memory you get."
     )
     spawn_line = "" if can_spawn else "\nNo `spawn` in this run: do the work yourself.\n"
-    check_section = (
-        "\nYour response is refused unless this command succeeds; the reason lands in "
-        f"register {RESULT_REGISTER} and you keep working:\n\n    {check}\n"
-        if check
-        else ""
-    )
+    # 0.0.8b §2 says the one thing that must be true at every model call is the
+    # active goal, stated precisely. The first live 0.0.8 run said what happens
+    # when it is not: a child whose goal was a file spent 27 steps re-reading
+    # that file, its own instruction and the stub, and wrote nothing. The goal
+    # is one sentence and the frame is what the run is; both belong here, where
+    # they cost nothing to remember.
+    frame_lines = []
+    if goal:
+        frame_lines.append(f"\n[Goal]\n{goal.strip()}")
+    if write:
+        frame_lines.append(f"\nPut the work in {write}.")
+    if check:
+        frame_lines.append(
+            "\nYour response is refused unless this command succeeds; the reason lands "
+            f"in register {RESULT_REGISTER} and you keep working:\n\n    {check}"
+        )
+    check_section = ("\n".join(frame_lines) + "\n") if frame_lines else ""
     # 0.0.8a §3 is stated in `bash`'s own schema and not repeated here: both
     # halves of the request are sent every step, so a second copy is a second
     # bill. What belongs here is only the consequence for the register file.

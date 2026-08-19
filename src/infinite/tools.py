@@ -693,6 +693,8 @@ class ToolBox:
             return_schema,
             max_steps=max_steps,
             check=check,
+            goal=goal,
+            write=write,
             depth_allowance=depth,
         )
         return self._child_result(

@@ -235,3 +235,65 @@ def test_the_parent_is_told_which_check_its_child_died_against(tmp_path):
     # And in register 0, which at a small geometry is all the parent reads.
     dump = parent.model.requests[-1]["messages"][0]["content"]
     assert "Its last check exited 127: `no-such-binary`" in dump
+
+
+# --- the frame is in the context, not only in a file ---------------------
+def test_the_goal_is_in_the_system_message_and_not_only_in_a_file(tmp_path):
+    """0.0.8b §2: the one thing that must be true at every model call.
+
+    The first live 0.0.8 run said what happens when it is not. A child whose
+    goal was a `goal_file` spent 27 of its 30 steps re-reading that file, its
+    own instruction and the stub it was to replace, and wrote nothing — the
+    goal was on disk, register 3 held 240 characters of the last step, and the
+    summariser is not something you can tell what to keep. The goal is one
+    sentence and costs nothing to carry.
+    """
+    parent = build_agent(tmp_path, max_steps=6)
+    parent.model.script = [
+        step(
+            tool_use(
+                "spawn", goal="implement run_step", check="true", write="src/loop.py",
+                goal_file="briefs/loop.md", return_schema={"type": "object"},
+                max_steps=1, register_id=6,
+            )
+        ),
+        step(text("the child idles")),
+        step(tool_use("bash", command="printf '{}' > " + parent.response_path.name)),
+    ]
+    parent.run()
+
+    child_system = parent.model.requests[1]["system"]
+    assert "[Goal]\nimplement run_step" in child_system
+    assert "Put the work in src/loop.py." in child_system
+    # And the long form is still by reference: in the brief on disk, which is
+    # read once, rather than in the message that is paid for every step.
+    assert "briefs/loop.md" not in child_system
+    child_id = child_system.split("instruction-")[1].split(".md")[0]
+    brief = (parent.workspace.root / f"instruction-{child_id}.md").read_text()
+    assert "Read briefs/loop.md before anything else." in brief
+
+
+def test_a_root_with_no_goal_has_no_goal_section(tmp_path):
+    built = build_agent(tmp_path)
+    try:
+        assert "[Goal]" not in built.system_message()
+    finally:
+        built.bash.close()
+
+
+def test_the_goal_survives_a_resume(tmp_path):
+    from infinite.agent import Agent
+
+    built = build_agent(tmp_path, max_steps=1)
+    built.goal, built.write, built.check = "hold this", "out.py", "true"
+    built.model.script = [step(text("no answer"))]
+    built.run()
+
+    again = Agent.resume(
+        workspace=built.workspace, model=built.model, agent_id=built.agent_id
+    )
+    try:
+        assert again.goal == "hold this" and again.write == "out.py"
+        assert "[Goal]\nhold this" in again.system_message()
+    finally:
+        again.bash.close()

@@ -239,6 +239,8 @@ class Agent:
         can_spawn: bool = True,
         seed: dict[int, str] | None = None,
         check: str | None = None,
+        goal: str | None = None,
+        write: str | None = None,
         depth_from_parent: bool = False,
     ):
         self.config = config
@@ -253,6 +255,12 @@ class Agent:
         #: parent's recollection nor the child's self-report, the two lossy
         #: parties, but on the machine.
         self.check = check
+        #: The one sentence its caller asked for, and where the work goes. Both
+        #: are names the caller already held, both are short, and both are in
+        #: the system message rather than only in the instruction file: a child
+        #: whose goal was a file spent 27 steps re-reading it.
+        self.goal = goal
+        self.write = write
         #: Whether the depth ceiling was allowed by a parent or set for the run.
         #: The refusal at the floor should name whose decision it was, because
         #: "the scaffold forbids it" is exactly the thing 0.0.8c removes.
@@ -387,6 +395,8 @@ class Agent:
             instruction_register=self.instruction_register,
             scratch_dir=self.workspace.display(self.scratch),
             check=self.check if self.config.run_checks else None,
+            goal=self.goal,
+            write=self.write,
             facts_file=(
                 self.workspace.display(self.workspace.facts_path())
                 if self.config.lookup
@@ -466,6 +476,8 @@ class Agent:
             depth=header.get("depth", 0),
             resume_from=next_step,
             check=header.get("check"),
+            goal=header.get("goal"),
+            write=header.get("write"),
             depth_from_parent=header.get("depth_from_parent", False),
         )
         for i, value in enumerate(values[: config.num_registers]):
@@ -592,6 +604,8 @@ class Agent:
                     "trajectory_file": self.workspace.display(self.trajectory.path),
                     "return_schema": self.return_schema,
                     "check": self.check,
+                    "goal": self.goal,
+                    "write": self.write,
                     "depth_from_parent": self.depth_from_parent,
                     "config": vars(self.config),
                     "context": self.context,
@@ -1308,6 +1322,8 @@ class Agent:
         max_steps: int | None = None,
         *,
         check: str | None = None,
+        goal: str | None = None,
+        write: str | None = None,
         depth_allowance: int | None = None,
     ) -> AgentResult:
         """A fresh agent in this workspace, with a budget out of its parent's.
@@ -1340,6 +1356,8 @@ class Agent:
             return_schema=return_schema,
             depth=depth,
             check=check,
+            goal=goal,
+            write=write,
             depth_from_parent=from_parent,
         )
         logger.info(

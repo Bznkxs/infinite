@@ -430,7 +430,13 @@ FRAME = dict(
     max_register_length=208,
     max_special_length=1536,
     max_target_length=704,
-    max_step_half_length=240,
+    #: 240 at 0.0.7g, and the first live 0.0.8 run is what moved it: a child
+    #: spent 27 steps re-reading the same four files and wrote nothing, and its
+    #: commands ran to 150-250 characters each with two of them in a step — so
+    #: the `[action]` half of register 3 could not hold what the agent had just
+    #: done, and every step re-derived it. 544 more characters of dump is about
+    #: 210 tokens; a step that cannot see its predecessor costs more than that.
+    max_step_half_length=512,
     #: 0.0.8a §5: nearer 4,096 than 1,536, so one working set fits in one place.
     max_canvas_length=4096,
     workspace_tokens=8192,
