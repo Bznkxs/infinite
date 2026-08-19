@@ -100,6 +100,48 @@ def _action_text(calls: list[Any], *, dropped: int = 0) -> str:
     return text
 
 
+#: The shortest register value counted as transit. Below this a match is as
+#: likely to be a coincidence — "True", a two-letter flag — as a value the model
+#: copied out of the dump.
+MIN_TRANSIT_CHARS = 16
+
+
+def _transit(before: list[str], calls: list[Any], *, shell: bool) -> dict[str, Any]:
+    """What this step spent generating values it already had — 0.0.8a's §7.1.
+
+    The letter's first open question is whether transit costs anything
+    measurable: "output tokens spent on literals that already existed verbatim
+    in a register". If the answer is "not much", registers-as-files is justified
+    by the working set alone (§4) and not by the copying it saves.
+
+    So the scaffold counts it. `retyped` is the characters of register values
+    that turn up verbatim inside the step's tool-call arguments; `generated` is
+    all the characters of those arguments; `references` is how many times the
+    step reached a register through the shell instead, which is the same
+    quantity going the other way.
+    """
+    arguments = "\n".join(
+        json.dumps(call.input, ensure_ascii=False, default=str) for call in calls
+    )
+    if not arguments:
+        return {"generated": 0, "retyped": 0, "registers": [], "references": 0}
+    retyped, registers = 0, []
+    for i, value in enumerate(before):
+        if len(value) >= MIN_TRANSIT_CHARS and value in arguments:
+            retyped += len(value)
+            registers.append(i)
+    references = 0
+    if shell:
+        for i in range(len(before)):
+            references += arguments.count(f"$R{i}") + arguments.count(f"REGDIR/{i}")
+    return {
+        "generated": len(arguments),
+        "retyped": retyped,
+        "registers": registers,
+        "references": references,
+    }
+
+
 def _complete_calls(response) -> tuple[list[Any], int]:
     """The calls of a cut-off generation that are certainly whole.
 
@@ -630,6 +672,9 @@ class Agent:
                     _complete_calls(response) if cut_off else (response.tool_calls, 0)
                 )
                 action = _action_text(calls, dropped=dropped)
+                record["transit"] = _transit(
+                    registers_before, calls, shell=self.regshell is not None
+                )
                 text, clipped = _step_text(
                     thinking, action, self.config.max_step_half_length
                 )

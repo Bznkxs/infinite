@@ -168,6 +168,40 @@ class SymbolIndex:
             del self._cache[gone]
         return found
 
+    @staticmethod
+    def _as_path(query: str) -> str | None:
+        """The file a query names, if it names one rather than a symbol.
+
+        A live run answered this question for the design: asked to implement a
+        module that calls into six others, the agent never used `lookup` at all.
+        It ran one `grep` for every `def` in the package and put 75 lines in a
+        file. What it wanted was not a symbol but a *surface* — the interface of
+        a module, all at once — and one-symbol-at-a-time is six calls to get
+        what `grep` gets in one. So a path is a query too, and unlike the grep
+        it returns real signatures rather than the first line of each one.
+        """
+        if query.endswith(".py"):
+            return query
+        # A dotted module name, which is how an importer knows it. Modules are
+        # lower case and classes are not, so `RegisterFile.store` stays a
+        # symbol and `infinite_agent.registers` becomes a path.
+        parts = query.split(".")
+        if "/" not in query and len(parts) > 1 and query == query.lower():
+            if all(part.isidentifier() for part in parts):
+                return "/".join(parts) + ".py"
+        return None
+
+    def outline(self, path: str, limit: int) -> tuple[list[Symbol], int]:
+        """Every definition in one file, in the order they appear."""
+        wanted = path.lstrip("./")
+        hits = [
+            s
+            for s in self.symbols()
+            if s.path == wanted or s.path.endswith("/" + wanted)
+        ]
+        hits.sort(key=lambda s: (s.path, s.line))
+        return hits[:limit], len(hits)
+
     def lookup(self, symbol: str, limit: int) -> tuple[list[Symbol], int]:
         """Matches for `symbol`, most exact first, and how many there were.
 

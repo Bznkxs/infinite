@@ -153,17 +153,21 @@ def tool_specs(config: Config, *, spawn: bool = True) -> list[dict[str, Any]]:
             {
                 "name": "lookup",
                 "description": (
-                    "One line per definition of `symbol` in the workspace's Python — "
-                    "where it is and what it takes. Several lookups in one step assemble "
-                    "a working set of lines rather than pages; ask before reading a file "
-                    "to find out how to call what is in it."
+                    "One line per definition — where it is and what it takes. Give it a "
+                    "symbol for one fact, or a file for the whole surface of a module, "
+                    "which is how you learn to call into one without reading it. A "
+                    "working set is then lines rather than pages."
                 ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "symbol": {
                             "type": "string",
-                            "description": "A name, `Class.method`, or a fragment.",
+                            "description": (
+                                "A name, `Class.method`, a fragment — or a path "
+                                "(`src/registers.py`, `pkg.registers`) for every "
+                                "definition in that file."
+                            ),
                         },
                         "register_id": destination,
                     },
@@ -508,7 +512,16 @@ class ToolBox:
         if error:
             return self._failed(call, error)
 
-        hits, total = self.agent.index.lookup(symbol, self.config.lookup_max_matches)
+        index = self.agent.index
+        path = index._as_path(symbol)
+        if path is not None:
+            hits, total = index.outline(path, self.config.lookup_max_outline)
+            # A dotted name that names nothing is more likely a symbol with a
+            # dot in it than a module, so fall back rather than report a miss.
+            if not hits:
+                hits, total = index.lookup(symbol, self.config.lookup_max_matches)
+        else:
+            hits, total = index.lookup(symbol, self.config.lookup_max_matches)
         if not hits:
             payload = ""
             status = (

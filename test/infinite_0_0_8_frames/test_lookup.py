@@ -166,3 +166,57 @@ def test_lookup_can_be_left_out_for_a_comparison(tmp_path):
         ).status
     finally:
         built.bash.close()
+
+
+# --- a surface, not a fact -----------------------------------------------
+def test_a_path_asks_for_the_whole_surface_of_a_module(agent):
+    """The first live 0.0.8 run never called `lookup` once.
+
+    Asked to implement a module that calls into six others, the agent ran one
+    `grep` for every `def` in the package and put 75 lines in a file. What it
+    wanted was not a symbol but an interface, all at once — and one symbol at a
+    time is six calls to get what one `grep` gets. So a path is a query too, and
+    unlike the grep it returns real signatures rather than first lines.
+    """
+    (agent.workspace.root / "registers.py").write_text(SOURCE)
+    result = run(agent, "lookup", symbol="registers.py", register_id=agent.config.canvas_id)
+
+    lines = agent.registers.values[agent.config.canvas_id].splitlines()
+    assert result.status.startswith("OK lookup 'registers.py': 6 of 6")
+    assert any("class RegisterFile" in line for line in lines)
+    assert any("def RegisterFile.store" in line for line in lines)
+    assert any("VERSION" in line for line in lines)
+    # In the order they appear in the file, which is how a module reads.
+    assert lines == sorted(lines, key=lambda l: int(l.split(":")[1].split()[0]))
+
+
+def test_a_dotted_module_name_is_a_path_and_a_dotted_symbol_is_not(agent):
+    (agent.workspace.root / "pkg").mkdir()
+    (agent.workspace.root / "pkg" / "registers.py").write_text(SOURCE)
+
+    whole = run(agent, "lookup", symbol="pkg.registers", register_id=6)
+    assert "6 of 6" in whole.status
+
+    one = run(agent, "lookup", symbol="RegisterFile.store", register_id=6)
+    assert "1 of 1" in one.status
+    assert agent.registers.values[6].count("\n") == 0
+
+
+def test_a_dotted_name_that_is_neither_falls_back_rather_than_missing(agent):
+    (agent.workspace.root / "registers.py").write_text(SOURCE)
+    result = run(agent, "lookup", symbol="registers.store", register_id=6)
+    # No `registers/store.py`, so it is read as a symbol fragment instead.
+    assert "no definition" in result.status or "1 of 1" in result.status
+
+
+def test_an_outline_is_capped_at_what_a_register_can_hold(tmp_path):
+    built = build_agent(tmp_path, lookup_max_outline=3)
+    built.step = 1
+    try:
+        (built.workspace.root / "wide.py").write_text(
+            "".join(f"def thing_{i}(): pass\n" for i in range(10))
+        )
+        result = run(built, "lookup", symbol="wide.py", register_id=6)
+        assert result.status == "OK lookup 'wide.py': 3 of 10 (narrow it, or grep)"
+    finally:
+        built.bash.close()
