@@ -1,8 +1,10 @@
-"""The four tools of the 0.0.1-simple scaffold: bash, load, set, spawn.
+"""The tools: bash, load, set, set_target, lookup, spawn, resume.
 
-Every tool takes a destination register that receives its return information.
-The full, untruncated return information also goes into the trajectory, and for
-bash and spawn into a json file whose path lands in register 0.
+Every tool *may* take a destination register for its return information; since
+0.0.8a §4 it is optional, and omitting it discards the payload rather than
+spending one of five registers on a value the agent did not want. The status
+still lands in register 0, and the full, untruncated return information still
+goes into the trajectory — and for bash and spawn into a json file.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from .config import Config
 from .model import ToolCall
+from .prompt import build_brief
 
 if TYPE_CHECKING:  # pragma: no cover
     from .agent import Agent
@@ -37,7 +40,10 @@ def tool_specs(config: Config, *, spawn: bool = True) -> list[dict[str, Any]]:
 
     Sent in full every step, so the wording is priced per generation: 0.0.7g cut
     these from 1,547 tokens to a third of that, keeping every rule and dropping
-    the sentence that explained it. `spawn` was 634 of the 1,547 on its own.
+    the sentence that explained it. `spawn` was 634 of the 1,547 on its own, and
+    0.0.8c adds fields to it on the argument that the prose it stops a parent
+    generating is worth more than the schema it costs — a trade 7.4 asks to be
+    made explicitly, so it is stated here and measured in the run.
     """
     first = config.num_special_registers
     last = config.num_registers - 1
@@ -45,9 +51,10 @@ def tool_specs(config: Config, *, spawn: bool = True) -> list[dict[str, Any]]:
         "type": "integer",
         "minimum": first,
         "maximum": last,
+        # Repeated once per tool in every request, so it is priced seven times.
         "description": (
-            f"Register for the return information ({first}-{last}; {config.canvas_id} is "
-            "the canvas). Longer is cut to fit."
+            f"Optional register for the return information ({first}-{last}; "
+            f"{config.canvas_id} is the canvas), cut to fit. Omit to discard it."
         ),
     }
     specs = [
@@ -58,6 +65,16 @@ def tool_specs(config: Config, *, spawn: bool = True) -> list[dict[str, Any]]:
                 "(stdout and stderr interleaved) goes to the register, and in full to a "
                 "json file whose path lands in register 0. This is how you write files, "
                 "your response file included."
+                # 0.0.8a §3, and said here only: the system message would be a
+                # second copy of it, and both are in every request.
+                + (
+                    f" The registers are files: $R0-$R{last} are their values and "
+                    f"$REGDIR/0-$REGDIR/{last} the files, and a file you write becomes "
+                    "that register when the command ends — `cp $REGDIR/5 $REGDIR/6`, "
+                    f"`grep -c . \"$R5\" > $REGDIR/6`. 0-{first - 1} are read-only."
+                    if config.registers_as_files
+                    else ""
+                )
             ),
             "input_schema": {
                 "type": "object",
@@ -65,7 +82,7 @@ def tool_specs(config: Config, *, spawn: bool = True) -> list[dict[str, Any]]:
                     "command": {"type": "string"},
                     "register_id": destination,
                 },
-                "required": ["command", "register_id"],
+                "required": ["command"],
             },
         },
         {
@@ -82,14 +99,15 @@ def tool_specs(config: Config, *, spawn: bool = True) -> list[dict[str, Any]]:
                     "start": {"type": "integer", "minimum": 0, "description": "0-based character offset."},
                     "register_id": destination,
                 },
-                "required": ["path", "start", "register_id"],
+                "required": ["path", "start"],
             },
         },
         {
             "name": "set",
             "description": (
                 "Store a value in a register; non-strings are stringified. If it does not "
-                "fit, the register is unchanged and register 0 holds the error."
+                "fit, the register is unchanged and register 0 holds the error. For a "
+                "value you are the author of — a plan, a note, a decision."
             ),
             "input_schema": {
                 "type": "object",
@@ -122,59 +140,124 @@ def tool_specs(config: Config, *, spawn: bool = True) -> list[dict[str, Any]]:
                 "required": ["content"],
             },
         },
+    ]
+    if config.lookup:
+        specs.append(
+            {
+                "name": "lookup",
+                "description": (
+                    "One line per definition of `symbol` in the workspace's Python — "
+                    "where it is and what it takes. Several lookups in one step assemble "
+                    "a working set of lines rather than pages; ask before reading a file "
+                    "to find out how to call what is in it."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "A name, `Class.method`, or a fragment.",
+                        },
+                        "register_id": destination,
+                    },
+                    "required": ["symbol"],
+                },
+            }
+        )
+    specs.append(
         {
             "name": "spawn",
             "description": (
-                "Run a fresh sub-agent on `prompt`. It starts with empty registers and its "
-                "own trajectory and budget, and shares this workspace's files. Its response "
-                "(which must match `return_schema`) and its trajectory path go to the "
-                "register; its response file path lands in register 0. Use it for work "
-                "whose intermediate context you do not want to keep. Several `spawn` calls "
-                "in one step run at the same time, so a fan-out costs the slowest child "
-                "rather than the sum — ask for them in one step and give each child its own "
-                "files to write."
+                "Descend one frame: a child with a fresh context, its own trajectory, "
+                "this workspace, and steps out of your budget. Name things; it works out "
+                "method — you do not have its facts and are not meant to. Spawns in one "
+                "step run at the same time."
             ),
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "prompt": {
+                    "goal": {
                         "type": "string",
                         "description": (
-                            "The sub-agent's instruction. It reads the same files you can, "
-                            "so name paths and line ranges instead of pasting contents. Ask "
-                            "for the thing you want, never for a number of characters: a "
-                            "child told to hit a length spends its budget measuring and "
-                            "rewriting."
+                            "One sentence: what must be true when it returns. Longer "
+                            "belongs in `goal_file`."
+                        ),
+                    },
+                    "check": {
+                        "type": "string",
+                        "description": (
+                            "Command that decides whether the work is done — an import, a "
+                            "test, a diff. Run when the child writes its response; a "
+                            "response that fails it is refused and it keeps going. `true` "
+                            "opts out, deliberately."
                         ),
                     },
                     "return_schema": {
                         "type": "object",
                         "description": "JSON Schema its response must satisfy.",
                     },
+                    "read": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Where to start reading. Pointers, not permission: it may "
+                            "read anything."
+                        ),
+                    },
+                    "write": {"type": "string", "description": "Where the work goes."},
+                    "goal_file": {
+                        "type": "string",
+                        "description": (
+                            "A file holding the goal in full; the child gets the path, so "
+                            "nothing passes through your generation."
+                        ),
+                    },
                     "max_steps": {
                         "type": "integer",
                         "minimum": 1,
                         "description": (
-                            "Steps it may take before it gives up and returns an error. "
-                            "Omit to give it your own budget. Set it to what you think the "
-                            "job is worth — you are waiting for it."
+                            "Steps it may take, out of what is left of yours. Omit to "
+                            "give it all of them."
                         ),
                     },
-                    "resume": {
-                        "type": "string",
+                    "depth": {
+                        "type": "integer",
+                        "minimum": 0,
                         "description": (
-                            "Id of a child that ran out, to continue rather than start "
-                            "again: it keeps its registers, files and step count, and "
-                            "`prompt`/`return_schema` are ignored. Give it a `max_steps`."
+                            "Levels it may descend below itself. Omit to pass on your "
+                            "allowance; 0 stops it spawning."
                         ),
                     },
                     "register_id": destination,
                 },
-                "required": ["prompt", "return_schema", "register_id"],
+                "required": ["goal", "check", "return_schema"],
             },
-        },
-    ]
-    return specs if spawn else [s for s in specs if s["name"] != "spawn"]
+        }
+    )
+    specs.append(
+        {
+            "name": "resume",
+            "description": (
+                "Give a child that ran out more steps. It keeps its registers, files, "
+                "check and step count — a child that ran out is a process to continue, "
+                "not work to redo."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "The id in its handoff file."},
+                    "max_steps": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "More, out of what is left of yours.",
+                    },
+                    "register_id": destination,
+                },
+                "required": ["agent_id", "max_steps"],
+            },
+        }
+    )
+    return specs if spawn else [s for s in specs if s["name"] not in ("spawn", "resume")]
 
 
 class ToolBox:
@@ -195,22 +278,26 @@ class ToolBox:
             "set": self._set,
             "set_target": self._set_target,
             "spawn": self._spawn,
+            "resume": self._resume,
         }
+        if not self.config.lookup:
+            handlers.pop("lookup", None)
+        else:
+            handlers["lookup"] = self._lookup
         if not self.agent.can_spawn:
             # Not offered, so this is a model calling a tool it was not given —
             # refused here too, because that is where recursion would start.
             handlers.pop("spawn")
+            handlers.pop("resume")
         handler = handlers.get(call.name)
         if handler is None:
-            if call.name == "spawn":
+            if call.name in ("spawn", "resume"):
                 # Say *why* it is gone rather than "unknown tool": an agent at
                 # the floor that asks anyway should learn the reason once,
-                # instead of concluding the tool list was wrong.
-                return self._failed(
-                    call,
-                    f"error: no `spawn` tool at depth {self.agent.depth} "
-                    f"(max_depth={self.config.max_depth}); do this work yourself",
-                )
+                # instead of concluding the tool list was wrong. 0.0.8c §6: the
+                # number is somebody's allowance, not a constant the scaffold
+                # picked, and the refusal says whose.
+                return self._failed(call, f"error: {self.agent.depth_refusal()}")
             return self._failed(call, f"error: unknown tool {call.name!r}")
         try:
             return handler(call)
@@ -229,7 +316,17 @@ class ToolBox:
         )
 
     def _destination(self, call: ToolCall) -> tuple[int | None, str | None]:
-        register_id = call.input.get("register_id")
+        """The register to land in, or None for "discard the payload".
+
+        0.0.8a §4: the write used to be unconditional, and with five free
+        registers a five-call step — precisely what 0.0.7e's batching advice
+        asks for — overwrote every one of them. The scaffold told the agent to
+        batch and charged it its whole memory for complying. Any register it now
+        declines to name is pinned by construction, and it decides which.
+        """
+        if call.input.get("register_id") is None:
+            return None, None
+        register_id = call.input["register_id"]
         error = self.agent.registers.check_destination(register_id)
         if error:
             return None, error
@@ -252,21 +349,31 @@ class ToolBox:
         if error:  # reject before running, so the command has no side effects
             return self._failed(call, error)
 
-        output = self.agent.bash.execute_command(command)
+        output, notes = self.agent.run_shell(command)
         path = self._write_output_file(
-            "bash", {"tool": "bash", "command": command, "output": output}
+            "bash",
+            {
+                "tool": "bash",
+                "command": command,
+                "output": output,
+                "registers_written": notes,
+            },
         )
         display = self.agent.workspace.display(path)
+        # The registers the command wrote are named in register 0, because the
+        # dump shows a changed register and not what changed it.
+        status = display if not notes else f"{display}\nshell wrote {', '.join(notes)}"
         return ToolResult(
             name="bash",
             register_id=register_id,
             payload=output,
-            status=display,
+            status=status,
             record={
                 "tool": "bash",
                 "register_id": register_id,
                 "command": command,
                 "output": output,
+                "registers_written": notes,
                 "file": display,
             },
         )
@@ -302,7 +409,13 @@ class ToolBox:
             )
 
         text = path.read_text(encoding="utf-8", errors="replace")
-        limit = self.agent.registers.limit(register_id)
+        # With no destination the payload is discarded, so what is kept is only
+        # what the trajectory records; the canvas is the widest a register gets.
+        limit = (
+            self.agent.registers.limit(register_id)
+            if register_id is not None
+            else self.config.max_canvas_length
+        )
         excerpt = text[start : start + limit]
         status = (
             f"OK load {display} (length={len(text)}, start={start}, "
@@ -328,6 +441,8 @@ class ToolBox:
         if "value" not in call.input:
             return self._failed(call, "error: 'value' is required")
         value = call.input["value"]
+        if call.input.get("register_id") is None:
+            return self._failed(call, "error: 'register_id' is required by `set`")
         register_id, error = self._destination(call)
         if error:
             return self._failed(call, error)
@@ -377,52 +492,86 @@ class ToolBox:
             },
         )
 
-    def _spawn(self, call: ToolCall) -> ToolResult:
-        resume = call.input.get("resume")
-        prompt = call.input.get("prompt")
-        return_schema = call.input.get("return_schema")
-        if resume is not None and not isinstance(resume, str):
-            return self._failed(call, "error: 'resume' must be an agent id")
-        if resume is None:
-            if not isinstance(prompt, str):
-                return self._failed(call, "error: 'prompt' must be a string")
-            if not isinstance(return_schema, dict):
-                return self._failed(
-                    call, "error: 'return_schema' must be a JSON Schema object"
-                )
+    def _lookup(self, call: ToolCall) -> ToolResult:
+        """7.1: turn width into depth — a signature costs a line, not a page."""
+        symbol = call.input.get("symbol")
+        if not isinstance(symbol, str):
+            return self._failed(call, "error: 'symbol' must be a string")
         register_id, error = self._destination(call)
         if error:
             return self._failed(call, error)
-        max_steps = call.input.get("max_steps")
+
+        hits, total = self.agent.index.lookup(symbol, self.config.lookup_max_matches)
+        if not hits:
+            payload = ""
+            status = (
+                f"no definition of {symbol!r} in the workspace's Python. "
+                "It may be in another language, imported from elsewhere, or spelled "
+                "differently — `grep` for it."
+            )
+        else:
+            payload = "\n".join(hit.render() for hit in hits)
+            status = f"OK lookup {symbol!r}: {len(hits)} of {total}"
+            if total > len(hits):
+                status += " (narrow it, or grep)"
+            # The memo table of 0.0.8b §4, kept by the scaffold for the half an
+            # AST can know. What it cannot know — that a return is None on
+            # cut-off, which of two plausible functions this project uses — the
+            # agent appends itself, and `grep` is the whole of the query.
+            self.agent.workspace.remember(hit.render() for hit in hits)
+        return ToolResult(
+            name="lookup",
+            register_id=register_id,
+            payload=payload,
+            status=status,
+            record={
+                "tool": "lookup",
+                "register_id": register_id,
+                "symbol": symbol,
+                "matches": total,
+                "content": payload,
+            },
+        )
+
+    def _allowance(self, call: ToolCall, max_steps: Any) -> tuple[int | None, str | None]:
+        """The steps a child may have, out of what is left of its parent's.
+
+        0.0.8c §5. Until now a parent's counter moved by one however many steps
+        its child spent, so commissioning a hundred-step digest and running one
+        `grep` cost the same — and a run has already spent 124 steps on a digest
+        and a checklist under exactly those incentives. Charged, `max_steps`
+        stops being a wish and becomes an allocation.
+        """
         if max_steps is not None and (
             not isinstance(max_steps, int) or isinstance(max_steps, bool) or max_steps < 1
         ):
-            return self._failed(
-                call, f"error: 'max_steps' must be an integer >= 1, got {max_steps!r}"
+            return None, f"error: 'max_steps' must be an integer >= 1, got {max_steps!r}"
+        if not self.config.charge_children:
+            return max_steps, None
+        left = self.agent.allowance()
+        if left is None:  # no cap on the parent, so none to pass down
+            return max_steps, None
+        if left < 1:
+            return None, (
+                "error: no steps left to give a child — your budget is spent on this "
+                "step. Finish what you can and write your response file."
             )
-        if self.agent.depth + 1 > self.config.max_depth:
-            return self._failed(
-                call,
-                f"error: spawn depth limit reached (max_depth={self.config.max_depth}); "
-                "do this work yourself",
-            )
+        if max_steps is None or max_steps > left:
+            return left, None
+        return max_steps, None
 
-        if resume is not None:
-            if resume == self.agent.agent_id:
-                return self._failed(call, "error: an agent cannot resume itself")
-            if not self.agent.workspace.trajectory_path(resume).exists():
-                return self._failed(
-                    call, f"error: no agent {resume} in this workspace to resume"
-                )
-            result = self.agent.resume_child(resume, max_steps)
-        else:
-            result = self.agent.spawn_child(prompt, return_schema, max_steps)
+    def _child_result(self, call: ToolCall, result, register_id, record) -> ToolResult:
+        """The common return shape of `spawn` and `resume`."""
         trajectory = self.agent.workspace.display(result.trajectory_path)
         response_file = self.agent.workspace.display(result.response_path)
-        response: dict[str, Any] = {"file": response_file, "steps": result.steps}
+        response: dict[str, Any] = {
+            "file": response_file,
+            "steps": result.steps,
+            "cost": result.cost,
+        }
         if result.ok:
             response["content"] = result.response
-            status = response_file
+            status = f"{response_file} ({result.cost} steps of yours)"
         else:
             response["error"] = result.error
             # The path first, as everywhere else: at a small geometry this
@@ -436,23 +585,123 @@ class ToolBox:
             response["handoff"] = handoff
             status = (
                 f"{handoff}\nerror: sub-agent {result.agent_id} stopped after "
-                f"{result.steps} steps without a response. That file says where it got "
-                f'to; continue it with spawn(resume="{result.agent_id}", max_steps=N).'
+                f"{result.steps} steps ({result.cost} of yours) without a response. That "
+                f"file says where it got to; continue it with "
+                f'resume(agent_id="{result.agent_id}", max_steps=N).'
             )
         content = {"trajectory": trajectory, "response": response}
+        record = {
+            **record,
+            "register_id": register_id,
+            "agent_id": result.agent_id,
+            "cost": result.cost,
+            "content": content,
+        }
         return ToolResult(
-            name="spawn",
+            name=call.name,
             register_id=register_id,
             payload=json.dumps(content, ensure_ascii=False, indent=2, default=str),
             status=status,
-            record={
+            record=record,
+        )
+
+    def _spawn(self, call: ToolCall) -> ToolResult:
+        """Descend one frame. 0.0.8c: the brief names, and does not describe.
+
+        The parent is the lossy frame by construction, so the field that asked
+        it for prose asked for something it could not supply — and briefs came
+        out either as 0.0.6's 42KB contract document or as one vague paragraph.
+        Everything a lossy caller *can* state precisely is a name: a goal, some
+        paths, an output location, and the command that decides whether the work
+        is done.
+        """
+        goal = call.input.get("goal")
+        check = call.input.get("check")
+        return_schema = call.input.get("return_schema")
+        if not isinstance(goal, str) or not goal.strip():
+            return self._failed(call, "error: 'goal' must be a non-empty sentence")
+        if not isinstance(check, str) or not check.strip():
+            return self._failed(
+                call,
+                "error: 'check' must be a command that decides whether the work is done; "
+                'use "true" to say deliberately that there is none',
+            )
+        if not isinstance(return_schema, dict):
+            return self._failed(call, "error: 'return_schema' must be a JSON Schema object")
+        read = call.input.get("read")
+        if read is not None and (
+            not isinstance(read, list) or not all(isinstance(r, str) for r in read)
+        ):
+            return self._failed(call, "error: 'read' must be a list of paths")
+        write = call.input.get("write")
+        if write is not None and not isinstance(write, str):
+            return self._failed(call, "error: 'write' must be a path")
+        goal_file = call.input.get("goal_file")
+        if goal_file is not None and not isinstance(goal_file, str):
+            return self._failed(call, "error: 'goal_file' must be a path")
+        depth = call.input.get("depth")
+        if depth is not None and (
+            not isinstance(depth, int) or isinstance(depth, bool) or depth < 0
+        ):
+            return self._failed(call, f"error: 'depth' must be an integer >= 0, got {depth!r}")
+        register_id, error = self._destination(call)
+        if error:
+            return self._failed(call, error)
+        max_steps, error = self._allowance(call, call.input.get("max_steps"))
+        if error:
+            return self._failed(call, error)
+
+        brief = build_brief(
+            goal=goal,
+            check=check,
+            read=read,
+            write=write,
+            goal_file=goal_file,
+        )
+        result = self.agent.spawn_child(
+            brief,
+            return_schema,
+            max_steps=max_steps,
+            check=check,
+            depth_allowance=depth,
+        )
+        return self._child_result(
+            call,
+            result,
+            register_id,
+            {
                 "tool": "spawn",
-                "register_id": register_id,
-                "prompt": prompt,
+                "goal": goal,
+                "check": check,
+                "read": read,
+                "write": write,
+                "goal_file": goal_file,
+                "brief": brief,
                 "return_schema": return_schema,
                 "max_steps": max_steps,
-                "resume": resume,
-                "agent_id": result.agent_id,
-                "content": content,
+                "depth": depth,
             },
+        )
+
+    def _resume(self, call: ToolCall) -> ToolResult:
+        agent_id = call.input.get("agent_id")
+        if not isinstance(agent_id, str):
+            return self._failed(call, "error: 'agent_id' must be an agent id")
+        if agent_id == self.agent.agent_id:
+            return self._failed(call, "error: an agent cannot resume itself")
+        if not self.agent.workspace.trajectory_path(agent_id).exists():
+            return self._failed(call, f"error: no agent {agent_id} in this workspace to resume")
+        register_id, error = self._destination(call)
+        if error:
+            return self._failed(call, error)
+        max_steps, error = self._allowance(call, call.input.get("max_steps"))
+        if error:
+            return self._failed(call, error)
+
+        result = self.agent.resume_child(agent_id, max_steps)
+        return self._child_result(
+            call,
+            result,
+            register_id,
+            {"tool": "resume", "resume": agent_id, "max_steps": max_steps},
         )

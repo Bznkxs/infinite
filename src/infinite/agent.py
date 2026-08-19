@@ -10,6 +10,8 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import shlex
+import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -34,8 +36,10 @@ from .config import (
     Config,
 )
 from .firewall import Firewall
+from .index import SymbolIndex
 from .model import Model
 from .prompt import build_system_message
+from .regfile import RegisterShell
 from .registers import RegisterFile
 from .tools import ToolBox, ToolResult
 from .trajectory import FORMAT_VERSION, Trajectory
@@ -158,6 +162,13 @@ class AgentResult:
     #: Written only when the run did not finish: what it was trying to do and
     #: what it had established, for whoever picks it up.
     handoff_path: Path | None = None
+    #: Steps this segment took, as against `steps`, which counts every segment
+    #: on record.
+    segment_steps: int = 0
+    #: What the whole subtree cost: this segment's own steps plus everything its
+    #: descendants spent. This is the number that comes out of a parent's
+    #: budget, and the number 0.0.7j could only show.
+    cost: int = 0
 
 
 class Agent:
@@ -174,6 +185,8 @@ class Agent:
         resume_from: int = 0,
         can_spawn: bool = True,
         seed: dict[int, str] | None = None,
+        check: str | None = None,
+        depth_from_parent: bool = False,
     ):
         self.config = config
         self.workspace = workspace
@@ -181,14 +194,38 @@ class Agent:
         self.agent_id = agent_id or workspace.new_agent_id()
         self.return_schema = return_schema
         self.depth = depth
+        #: 0.0.8c §3: the command that decides whether this agent's work is
+        #: done. The scaffold runs it when a response lands, and a response that
+        #: fails it is not a return — so correctness rests on neither the
+        #: parent's recollection nor the child's self-report, the two lossy
+        #: parties, but on the machine.
+        self.check = check
+        #: Whether the depth ceiling was allowed by a parent or set for the run.
+        #: The refusal at the floor should name whose decision it was, because
+        #: "the scaffold forbids it" is exactly the thing 0.0.8c removes.
+        self.depth_from_parent = depth_from_parent
+        #: Steps this agent's descendants have taken, which come out of its own
+        #: budget (0.0.8c §5). Written from the spawn threads, so it is locked.
+        self.charged = 0
+        self._charge_lock = threading.Lock()
+        #: What one failed check said, attached to the step that ran it.
+        self._last_check: dict[str, Any] | None = None
         #: Steps already on record; a fresh run starts at 0.
         self.step = resume_from
+        #: Where this segment began, so a budget and an allowance can be worked
+        #: out before `run` starts as well as during it.
+        self._segment_start = resume_from
         self.resumed = resume_from > 0
         #: An agent at the depth floor cannot spawn, so it is not offered the
         #: tool: 0.0.6's run had one such agent try anyway, five times over
         #: thirty-four steps, because the refusal only lives in a register that
         #: gets rewritten. A tool that cannot succeed should not be in the list.
-        self.can_spawn = can_spawn and depth < config.max_depth
+        #: `max_depth` is None by default since 0.0.8c — the scaffold has no
+        #: opinion — and what bounds a tree instead is that its steps are
+        #: charged: a chain that never bottoms out still runs out of budget.
+        self.can_spawn = can_spawn and (
+            config.max_depth is None or depth < config.max_depth
+        )
         self.summarizes = config.summary
         #: Register 4's keeper: one tool-less call per step, not an agent.
         self.summariser = summary_module.Summariser(config, model)
@@ -226,12 +263,27 @@ class Agent:
         #: TMPDIR and caches pointed at it. Its own directory per agent, so a
         #: sub-agent's scratch does not appear in the parent's workspace.
         self.scratch = workspace.scratch_path(self.agent_id)
+        #: The register file as the shell sees it (0.0.8a §3), synced around
+        #: every `bash` call. None when the run is configured without it.
+        self.regshell = (
+            RegisterShell(
+                self.registers, workspace.reg_path(self.agent_id), config
+            )
+            if config.registers_as_files
+            else None
+        )
+        environment = workspace.environment(self.agent_id)
+        if self.regshell is not None:
+            environment.update(self.regshell.environment())
         self.bash = BashSession(
             cwd=str(workspace.root),
             timeout=config.bash_timeout,
             firewall=self.firewall,
-            env=workspace.environment(self.agent_id),
+            env=environment,
         )
+        #: 7.1's index, per agent because it caches parses and each agent has
+        #: its own thread.
+        self.index = SymbolIndex(workspace.root, display=workspace.display)
         self.tools = ToolBox(self)
         #: What one generation of this run can cost, at its fullest. Recorded in
         #: the trajectory and refused here if the config set a ceiling: the
@@ -276,6 +328,17 @@ class Agent:
             can_spawn=self.can_spawn,
             instruction_register=self.instruction_register,
             scratch_dir=self.workspace.display(self.scratch),
+            check=self.check if self.config.run_checks else None,
+            facts_file=(
+                self.workspace.display(self.workspace.facts_path())
+                if self.config.lookup
+                else None
+            ),
+            reg_dir=(
+                f"${self.regshell.environment_variable}"
+                if self.regshell is not None
+                else None
+            ),
         )
 
     @property
@@ -344,6 +407,8 @@ class Agent:
             return_schema=header.get("return_schema"),
             depth=header.get("depth", 0),
             resume_from=next_step,
+            check=header.get("check"),
+            depth_from_parent=header.get("depth_from_parent", False),
         )
         for i, value in enumerate(values[: config.num_registers]):
             agent.registers.values[i] = value
@@ -414,6 +479,7 @@ class Agent:
         system = self.system_message()
         tools = self.tools.specs()
         segment_start = self.step
+        self._segment_start = segment_start
         self._segment_started = time.monotonic()
         if self.summarizes:
             self._summary_pool = ThreadPoolExecutor(
@@ -467,6 +533,8 @@ class Agent:
                     "response_file": self.workspace.display(self.response_path),
                     "trajectory_file": self.workspace.display(self.trajectory.path),
                     "return_schema": self.return_schema,
+                    "check": self.check,
+                    "depth_from_parent": self.depth_from_parent,
                     "config": vars(self.config),
                     "context": self.context,
                     "seed_registers": sorted(self.seed),
@@ -496,6 +564,8 @@ class Agent:
                             step=self.step,
                             max_steps=self._budget_end(segment_start),
                             run=self.workspace.spent(),
+                            charged=self.charged,
+                            depth=self.depth,
                         ),
                     }
                 ]
@@ -581,6 +651,9 @@ class Agent:
                 # Read the response before summarising: a run that is over does
                 # not need a summary handed to a step that will never happen.
                 done, value, error = self.read_response()
+                if self._last_check is not None:
+                    record["check"] = self._last_check
+                    self._last_check = None
                 record["timing"] = _timing(
                     started_at, clock, generated, flushed, ran, time.monotonic()
                 )
@@ -622,10 +695,88 @@ class Agent:
             self.bash.close()
 
     def _within_budget(self, segment_start: int) -> bool:
-        """The budget is per segment, so a resumed run gets a fresh allowance."""
+        """The budget is per segment, so a resumed run gets a fresh allowance.
+
+        Since 0.0.8c a descendant's steps count against it too. Without that a
+        parent's counter moved by one however many steps its child spent, so
+        `max_steps` on a spawn was a wish rather than an allocation, and a
+        hundred-step digest cost the same as one `grep`.
+        """
         if self.config.max_steps is None:
             return True
-        return self.step - segment_start < self.config.max_steps
+        return self.step - segment_start + self.charged < self.config.max_steps
+
+    def allowance(self) -> int | None:
+        """Steps left for this agent's children, or None when it has no cap.
+
+        Counted from where the segment began, so a resumed agent's fresh
+        allowance is the one it can actually give away.
+        """
+        if self.config.max_steps is None:
+            return None
+        return (
+            self.config.max_steps - (self.step - self._segment_start) - self.charged
+        )
+
+    def charge(self, steps: int) -> None:
+        """Debit this agent for what a descendant spent."""
+        if not self.config.charge_children or steps <= 0:
+            return
+        with self._charge_lock:
+            self.charged += steps
+
+    def depth_refusal(self) -> str:
+        """Why there is no `spawn` here, and whose decision that was.
+
+        0.0.8c §6: a ceiling is a property of the subtree, and the refusal
+        should say *your parent allowed this depth* rather than *the scaffold
+        forbids it* — the scaffold no longer has an opinion.
+        """
+        ceiling = self.config.max_depth
+        if ceiling is None:  # then can_spawn was False for some other reason
+            return f"no `spawn` in this run; do this work yourself (depth {self.depth})"
+        whose = "your parent allowed" if self.depth_from_parent else "this run allows"
+        return (
+            f"no `spawn` at depth {self.depth}: {whose} depth {ceiling}. "
+            "Do this work yourself."
+        )
+
+    # --- the shell -----------------------------------------------------
+    def run_shell(self, command: str) -> tuple[str, list[str]]:
+        """One command, with the registers reachable as files around it.
+
+        0.0.8a §3. Out first, so `$R5` and `$REGDIR/5` are current at the moment
+        the command runs; back afterwards, so a file the command wrote becomes
+        the register it names. Both halves are the whole of copy, deref-copy and
+        computed-into-a-register, and none of them passes through a generation.
+        """
+        if self.regshell is None:
+            return self.bash.execute_command(command), []
+        self.regshell.sync_out()
+        output = self.bash.execute_command(self.regshell.preamble() + command)
+        return output, self.regshell.sync_in()
+
+    def run_check(self, command: str) -> tuple[int, str]:
+        """The acceptance test, as a machine operation. Returns (exit code, output).
+
+        In a subshell and pinned to the workspace root, so a check that `cd`s or
+        exits cannot move the session it borrowed. The registers are not synced
+        around it: a check decides whether the work is done and has no business
+        writing the agent's memory.
+        """
+        marker = "__INFINITE_CHECK_EXIT__"
+        root = shlex.quote(str(self.workspace.root))
+        wrapped = f"( cd {root} && {command} ) 2>&1; echo {marker}$?"
+        output = self.bash.execute_command(wrapped, timeout=self.config.check_timeout)
+        head, sep, tail = output.rpartition(marker)
+        if not sep:
+            # A timeout restarts the session and never prints the marker.
+            return -1, output
+        try:
+            code = int(tail.strip().splitlines()[0])
+        except (ValueError, IndexError):
+            return -1, output
+        return code, head
 
     def _generate(self, system, tools, messages):
         """The step's own model call, retried rather than fatal.
@@ -788,6 +939,7 @@ class Agent:
 
     def _result(self, *, ok: bool, response: Any, error: str | None = None) -> AgentResult:
         handoff = None if ok else self._write_handoff(error)
+        segment_steps = self.step - self._segment_start
         self.trajectory.append(
             {
                 "step": self.step + 1,
@@ -801,6 +953,9 @@ class Agent:
                 "segment_duration_s": round(
                     time.monotonic() - getattr(self, "_segment_started", time.monotonic()), 3
                 ),
+                "segment_steps": segment_steps,
+                "charged": self.charged,
+                "cost": segment_steps + self.charged,
                 "registers": self.registers.snapshot(),
             }
         )
@@ -813,6 +968,8 @@ class Agent:
             steps=self.step,
             error=error,
             handoff_path=handoff,
+            segment_steps=segment_steps,
+            cost=segment_steps + self.charged,
         )
 
     def _write_handoff(self, error: str | None) -> Path:
@@ -834,9 +991,10 @@ class Agent:
                     "target": self.registers.values[TARGET_REGISTER],
                     "summary": self.registers.values[SUMMARY_REGISTER],
                     "last_step": self.registers.values[STEP_REGISTER],
+                    "check": self.check,
                     "instruction_file": self.workspace.display(self.instruction_path),
                     "trajectory_file": self.workspace.display(self.trajectory.path),
-                    "resume_with": f'spawn(resume="{self.agent_id}", max_steps=N)',
+                    "resume_with": f'resume(agent_id="{self.agent_id}", max_steps=N)',
                 },
                 ensure_ascii=False,
                 indent=1,
@@ -872,7 +1030,58 @@ class Agent:
                     f"error: {name} does not match the required schema at {location}: "
                     f"{exc.message}; rewrite the whole file"
                 )
+        # 0.0.8c §3: a return that fails its check is not a return. This is the
+        # last thing that happens, because a response which does not parse has
+        # nothing for a check to be about.
+        if self.check and self.config.run_checks:
+            failure = self._check_failed()
+            if failure:
+                return False, None, failure
         return True, value, None
+
+    def _check_failed(self) -> str | None:
+        """Run the acceptance test; on failure, what register 0 should say.
+
+        The output goes to a file rather than into the register: at a small
+        geometry register 0 holds two hundred characters and a traceback is
+        thousands, and the thing to act on is the traceback.
+        """
+        clock = time.monotonic()
+        code, output = self.run_check(self.check)
+        path = self.workspace.output_path(self.agent_id, self.step, "check")
+        path.write_text(
+            json.dumps(
+                {
+                    "tool": "check",
+                    "command": self.check,
+                    "exit_code": code,
+                    "output": output,
+                    "passed": code == 0,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        display = self.workspace.display(path)
+        self._last_check = {
+            "command": self.check,
+            "exit_code": code,
+            "file": display,
+            "duration_s": round(time.monotonic() - clock, 3),
+        }
+        if code == 0:
+            logger.info("agent %s step %d: check passed", self.agent_id, self.step)
+            return None
+        logger.info(
+            "agent %s step %d: check failed (exit %d), response refused",
+            self.agent_id, self.step, code,
+        )
+        first = next((line for line in output.strip().splitlines()[::-1] if line.strip()), "")
+        return (
+            f"{display}\nerror: your check exited {code}, so the response is refused and "
+            f"you are still working. {first[:200]}"
+        )
 
     # --- the summary ---------------------------------------------------
     def _close_step(
@@ -1010,33 +1219,50 @@ class Agent:
             "no step cap" if child.config.max_steps is None
             else f"{child.config.max_steps} more steps",
         )
-        return child.run()
+        result = child.run()
+        self.charge(result.cost)
+        return result
 
     def spawn_child(
         self,
-        prompt: str,
+        brief: str,
         return_schema: dict[str, Any],
         max_steps: int | None = None,
+        *,
+        check: str | None = None,
+        depth_allowance: int | None = None,
     ) -> AgentResult:
-        """A fresh agent in this workspace, with a budget its parent may set.
+        """A fresh agent in this workspace, with a budget out of its parent's.
 
         Until 0.0.7f a child inherited the whole of its parent's `max_steps`,
         and there was no way to say otherwise: 0.0.7e's root asked for a digest
         of one part of a document and got a child that spent 278 steps and six
-        and a half hours on it, invisibly, because nothing bounded it and
-        nothing reported on it until it returned. A parent that can say how big
-        a job it thinks it is asking for gets an error in an hour instead.
+        and a half hours on it, invisibly. 0.0.7f let a parent bound it; 0.0.8c
+        makes the bound come out of the parent's own budget, so it is an
+        allocation rather than a wish.
+
+        `depth_allowance` is the other half of 0.0.8c §6: the scaffold picks no
+        ceiling, and a parent that wants one for its subtree passes it down the
+        way it passes steps. None means the child inherits whatever the parent
+        was allowed.
         """
         config = self.config
         if max_steps is not None:
             config = dataclasses.replace(config, max_steps=max_steps)
+        depth = self.depth + 1
+        from_parent = self.depth_from_parent
+        if depth_allowance is not None:
+            config = dataclasses.replace(config, max_depth=depth + depth_allowance)
+            from_parent = True
         child = Agent(
             config=config,
             workspace=self.workspace,
             model=self.model,
-            instruction=prompt,
+            instruction=brief,
             return_schema=return_schema,
-            depth=self.depth + 1,
+            depth=depth,
+            check=check,
+            depth_from_parent=from_parent,
         )
         logger.info(
             "agent %s step %d: spawning %s at depth %d (%s)",
@@ -1046,4 +1272,6 @@ class Agent:
             child.depth,
             "no step cap" if config.max_steps is None else f"{config.max_steps} steps",
         )
-        return child.run()
+        result = child.run()
+        self.charge(result.cost)
+        return result

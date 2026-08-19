@@ -65,7 +65,7 @@ def test_normalizes_a_step_into_dialogue_parts(runs):
     assert trajectory["reconstructed"] is False
     assert trajectory["format_version"] == 3
     assert [t["name"] for t in trajectory["context_template"]["tools"]] == [
-        "bash", "load", "set", "set_target", "spawn",
+        "bash", "load", "set", "set_target", "lookup", "spawn", "resume",
     ]
     first, last = trajectory["steps"][0], trajectory["steps"][-1]
     assert first["tool_calls"][0]["name"] == "set"

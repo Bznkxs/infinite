@@ -26,6 +26,39 @@ from .config import (
 )
 
 
+#: The brief a lossy caller can write — 0.0.8c §2. Everything a parent can state
+#: precisely from a lossy context is a *name*: a goal, some paths, an output
+#: location, and the command that decides whether the work is done. Everything
+#: it cannot state is method, and the child is the frame that has the facts for
+#: it. So the scaffold renders names into a brief rather than asking a parent
+#: for prose it is constitutionally unable to supply.
+def build_brief(
+    *,
+    goal: str,
+    check: str,
+    read: list[str] | None = None,
+    write: str | None = None,
+    goal_file: str | None = None,
+) -> str:
+    parts = [f"[Goal]\n{goal.strip()}"]
+    if goal_file:
+        parts.append(f"[Goal, in full]\nRead {goal_file} before anything else.")
+    if write:
+        parts.append(f"[Write]\n{write}")
+    parts.append(
+        "[Check]\nThe scaffold runs this when you write your response. A response that "
+        "fails it is refused, the reason lands in register 0, and you keep working.\n\n"
+        f"    {check.strip()}"
+    )
+    if read:
+        listed = "\n".join(f"- {item}" for item in read)
+        parts.append(
+            "[Start here]\nPointers, not limits — read anything you need, and expect "
+            f"this list to be incomplete.\n{listed}"
+        )
+    return "\n\n".join(parts) + "\n"
+
+
 def build_system_message(
     *,
     config: Config,
@@ -39,6 +72,9 @@ def build_system_message(
     can_spawn: bool = True,
     instruction_register: int | None = None,
     scratch_dir: str | None = None,
+    check: str | None = None,
+    facts_file: str | None = None,
+    reg_dir: str | None = None,
 ) -> str:
     first_free = config.num_special_registers
     last = config.num_registers - 1
@@ -76,6 +112,47 @@ def build_system_message(
         f"{RESULT_REGISTER}-{STEP_REGISTER} are all the memory you get."
     )
     spawn_line = "" if can_spawn else "\nNo `spawn` in this run: do the work yourself.\n"
+    check_section = (
+        "\nYour response is refused unless this command succeeds; the reason lands in "
+        f"register {RESULT_REGISTER} and you keep working:\n\n    {check}\n"
+        if check
+        else ""
+    )
+    # 0.0.8a §3 is stated in `bash`'s own schema and not repeated here: both
+    # halves of the request are sent every step, so a second copy is a second
+    # bill. What belongs here is only the consequence for the register file.
+    shell_registers = (
+        "\nA value that already exists somewhere should move through the shell "
+        f"(`bash`, `$R5`, `{reg_dir}/6`) rather than through a generation of yours; "
+        "`set` is for a value you are the author of.\n"
+        if reg_dir
+        else ""
+    )
+    memo_line = (
+        f"\n`lookup` costs a line, not a page. <{facts_file}> is this run's memo table: "
+        "`grep` it before you go looking, append a line for what an index cannot know.\n"
+        if facts_file
+        else ""
+    )
+    # 0.0.8b's invariant and 0.0.8c's rule for when to descend. Both are
+    # recommendations about how to work rather than determined actions, so by
+    # 0.0.8a's rule they are sentences here and not tools.
+    frames_section = (
+        "\n[Frames]\n\n"
+        "One goal at a time: precise about the goal you are on — the names it touches, "
+        "where its result goes — lossy about why you are here, and holding nothing about "
+        "what is beside it. A vague memory of the wider goal gives a wrong subgoal, "
+        "caught on return; a vague memory of a signature gives code that parses and is "
+        "wrong, caught by nothing. Precision down, lossiness up.\n\n"
+        "Descend at a working-set boundary: spawn when the subgoal needs facts you do "
+        "not have and you will not need its facts once it returns. Share most of your "
+        "facts with it and inline is cheaper. Do not decompose the task up front — that "
+        "is the widest thing you could do; find the parts by descending into them.\n\n"
+        "End work with a machine check — an import, a test, a diff. A check against your "
+        "own recollection is the mistake it is meant to catch, and a command costs you "
+        "no context.\n"
+        + memo_line
+    )
     wide = (
         f"{TARGET_REGISTER} and {SUMMARY_REGISTER} hold"
         if summarizes
@@ -85,12 +162,12 @@ def build_system_message(
     return f"""You are an agent running inside InfiniteAgent, a scaffold that keeps your active context to a fixed set of registers. Your working directory is {workspace_root}; paths below are relative to it.
 
 Read your instructions from <{instruction_file}>.{instruction_line} Write your final response to <{response_file}> as JSON. The run ends the moment that file exists and parses, so write it once, when the work is done.
-{schema_section}{firewall_section}{scratch_section}{spawn_line}
+{schema_section}{check_section}{firewall_section}{scratch_section}{spawn_line}
 [Registers]
 
 Each step you see this message, the tool schemas, and the registers — no conversation history. Anything you want to keep, put in a register with `set` or in a file whose path you keep in a register.
 
-Registers 0-{last}. {first_free}-{last} are yours; 0-{first_free - 1} are written by the system and no tool may target them.
+Registers 0-{last}. {first_free}-{last} are yours; 0-{first_free - 1} are written by the system and no tool may target them. A tool's `register_id` is optional: omit it and the payload is discarded while the status still lands in register {RESULT_REGISTER}, so a register you never name keeps what it holds through a step that reads four files.
 
 - {RESULT_REGISTER} last result: the return information of the single most recent tool call — a result-file path, or a short status or error. Only the most recent; earlier result files are still on disk.
 - {TRUNCATION_REGISTER} cut off?: "True" if your last generation was cut off, else "False". When True, register {STEP_REGISTER}'s `[thinking]` holds what you had produced; continue from there.
@@ -98,16 +175,18 @@ Registers 0-{last}. {first_free}-{last} are yours; 0-{first_free - 1} are writte
 - {STEP_REGISTER} last step: the step before this one and nothing earlier, as `[thinking]` (everything you generated but the calls) and `[action]` (the calls). Read it before deciding, and do not redo what it shows.
 {summary_line}
 
+{shell_registers}
 Lengths: registers {first_free}-{config.canvas_id - 1} hold {config.max_register_length} chars, {wide} {config.max_special_length}, {STEP_REGISTER} holds {config.max_step_half_length} of each half, and {config.canvas_id} is the canvas at {config.max_canvas_length} — the register for long excerpts. Anything longer than its register is cut to fit and tagged `truncated` in the dump; the whole of it is in the result file and the trajectory.
 
 [Working]
 
 You may generate {config.workspace_tokens} tokens a step. Over that the generation is cut off, saved to the trajectory, register {TRUNCATION_REGISTER} goes True, and no tool call in it takes effect. The past trajectory is in <{trajectory_file}>, which you can read but not write. A run can be stopped and resumed with registers and workspace intact, and the step counter carries on.
 
-The dump opens with `[Step] N of M` — where you are in the budget, and the only place you can see it. Pace against it.
+The dump opens with `[Step]`: how deep you are, which step this is, and what budget is left. A child's steps come out of that budget, so a delegation you cannot afford is one you can see. Pace against it.
 
 Every step should make at least one tool call. **One step is one generation, however many calls it holds**: four reads in one step cost one generation, in four steps they cost four steps of your budget. When you already know what you need — several ranges of a file, several files, a read and the command that follows it — ask for all of it in one step, each result in its own register; you have {spare} to land them in ({first_free}-{config.canvas_id - 1}, plus the canvas). Keep one-call steps for when the next thing genuinely depends on this answer.
 
 A file does not have to fit in a register. `load(path, start)` reads any file of any size from any offset — nothing is too big to read, only too big to read at once, and paging costs one call. Never rewrite a file to hit a character count, whether to fit a register or to meet a length someone asked you for: that is a length you cannot hit by generating, and measuring and rewriting until it fits is a loop with no end.
 
+{frames_section}
 Spend your steps on the thing you were asked for. A file you can read is not context you have to save, so copying source material into a file of your own buys nothing. Write plans and notes only where they change what you do next, and keep them short: a step that produces the deliverable is worth more than a step that describes it."""

@@ -95,6 +95,8 @@ class RegisterFile:
         step: int | None = None,
         max_steps: int | None = None,
         run: tuple[int, int] | None = None,
+        charged: int = 0,
+        depth: int | None = None,
     ) -> str:
         """The register dump that makes up the model's context each step.
 
@@ -106,13 +108,25 @@ class RegisterFile:
         `run` is the same argument one level up (0.0.7j): a parent's own counter
         moves by one however many steps the child it is waiting for spends, so
         the cost of delegating is invisible to the agent deciding to delegate.
+
+        `charged` is 0.0.8c §5, which is that clause made real rather than
+        merely visible: the steps this agent's children have taken come out of
+        its own remaining budget, so `max_steps` on a `spawn` stops being a wish
+        and becomes an allocation.
+
+        `depth` is 0.0.8c §6. The scaffold no longer has an opinion about how
+        deep a tree should go, and an agent that is to have one needs to be able
+        to see where it is standing.
         """
         lines = []
-        if step is not None:
-            spent = f"step {step}"
-            if max_steps:
-                left = max_steps - step + 1
-                spent += f" of {max_steps} ({left} left, including this one)"
+        if step is not None or depth is not None:
+            spent = "" if depth is None else f"depth {depth}"
+            if step is not None:
+                spent += (", " if spent else "") + f"step {step}"
+            if step is not None and max_steps:
+                left = max_steps - step + 1 - charged
+                spent += f" of {max_steps} ({left} left, including this one"
+                spent += f"; {charged} of your budget went to children)" if charged else ")"
                 # Four children have now finished their work and died without
                 # writing the one file that ends a run, each of them on a step
                 # that began "with only two steps remaining". The count was

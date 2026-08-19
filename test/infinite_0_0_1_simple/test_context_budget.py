@@ -33,9 +33,10 @@ def test_the_dump_ceiling_is_every_register_at_its_limit(tmp_path):
     )
     content = sum(config.register_limit(i) for i in range(config.num_registers))
     assert content == 100 + 100 + 200 + 121 + 200 + 100 + 100 + 400
-    # Plus the header line every register emits, whether or not it holds anything.
+    # Plus the header line every register emits, whether or not it holds
+    # anything, and the `[Step]` line at its very longest.
     assert config.dump_chars > content
-    assert config.dump_chars < content + 60 * config.num_registers + 100
+    assert config.dump_chars < content + 60 * config.num_registers + 300
 
 
 def test_the_budget_counts_both_halves_of_a_generation(tmp_path):
@@ -103,7 +104,15 @@ def test_the_target_can_be_smaller_than_the_summary(tmp_path):
     assert split.register_limit(5) == split.max_register_length
 
 
-def test_the_short_configuration_fits_in_eight_thousand_tokens(tmp_path):
+def test_the_short_configuration_fits_under_its_ceiling(tmp_path):
+    """0.0.7g bought 8,000; 0.0.8's own prose costs about 1,200 tokens more.
+
+    The register geometry is 0.0.7g's to the character — this preset is still
+    that *input* — and what moved is the fixed half: the frame discipline, the
+    optional destination, `lookup`, `resume`, and the sentence that makes the
+    registers reachable from the shell. 7.4 asks for that trade to be made
+    explicitly, which is what the number in the config is.
+    """
     agent = Agent(
         config=short_config(),
         workspace=Workspace(tmp_path / "run"),
@@ -112,11 +121,16 @@ def test_the_short_configuration_fits_in_eight_thousand_tokens(tmp_path):
         return_schema={"type": "object", "properties": {"answer": {"type": "string"}}},
     )
 
-    assert agent.config.max_context_tokens == 8000
-    assert agent.context["total_tokens"] <= 8000
-    # And it is a real scaffold, not a stub: five tools, five special registers,
-    # a canvas, and room to land a call in every free register.
-    assert len(agent.tools.specs()) == 5
+    assert agent.config.max_context_tokens == 9000
+    assert agent.context["total_tokens"] <= 9000
+    # And the agent's own share of it is reported beside the total, because a
+    # scaffold that grows its prose to buy the agent room should show both.
+    assert agent.context["working_set_chars"] == 5 * 208 + 1536 + 704
+    # And it is a real scaffold, not a stub: seven tools, five special
+    # registers, a canvas, and room to land a call in every free register.
+    assert [t["name"] for t in agent.tools.specs()] == [
+        "bash", "load", "set", "set_target", "lookup", "spawn", "resume",
+    ]
     assert agent.config.canvas_id == 10
     canvas = agent.registers.limit(agent.config.canvas_id)
     assert canvas == max(agent.registers.limit(i) for i in range(agent.config.num_registers))
@@ -132,6 +146,7 @@ def test_the_short_preset_is_only_a_geometry():
     for field in (
         "model", "effort", "thinking", "num_special_registers", "register_layout",
         "summary", "summary_model", "summary_effort", "max_depth", "spawn_workers",
+        "charge_children", "registers_as_files", "lookup", "run_checks",
         "step_retry_seconds", "api_max_retries", "firewall",
     ):
         assert getattr(short, field) == getattr(full, field), field

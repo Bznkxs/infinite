@@ -174,7 +174,7 @@ def _split_blocks(blocks: list[dict[str, Any]]) -> dict[str, list]:
 
 
 def _child_trajectory(result: dict[str, Any]) -> str | None:
-    if result.get("tool") != "spawn":
+    if result.get("tool") not in ("spawn", "resume"):
         return None
     return (result.get("content") or {}).get("trajectory")
 

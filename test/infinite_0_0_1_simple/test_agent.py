@@ -1,3 +1,4 @@
+import dataclasses
 import json
 
 import pytest
@@ -63,7 +64,8 @@ def test_context_is_only_the_register_dump(tmp_path):
         assert len(request["messages"]) == 1  # no conversation history
         assert request["messages"][0]["role"] == "user"
         content = request["messages"][0]["content"]
-        assert content.startswith("[Step] step ")  # 0.0.7d: the budget, then the dump
+        # 0.0.7d put the budget above the dump; 0.0.8c put the depth above that.
+        assert content.startswith("[Step] depth 0, step ")
         assert "\n[Registers]\n" in content
         assert request["max_tokens"] == agent.config.workspace_tokens
     # State carries over only through the registers.
@@ -237,7 +239,8 @@ def test_spawn_runs_a_child_with_its_own_registers_and_trajectory(tmp_path):
         step(
             tool_use(
                 "spawn",
-                prompt="count the lines",
+                goal="count the lines",
+                check="true",
                 return_schema=child_schema,
                 register_id=9,
             )
@@ -255,14 +258,25 @@ def test_spawn_runs_a_child_with_its_own_registers_and_trajectory(tmp_path):
     assert f"last result, special) ---\n{stored['response']['file']}" in model.requests[2]["messages"][0]["content"]
 
     spawn_record = agent.trajectory.read()[1]["observation"]["results"][0]
-    assert spawn_record["prompt"] == "count the lines"
+    assert spawn_record["goal"] == "count the lines"
+    # 0.0.8c: the parent names things and the scaffold renders the brief, so
+    # what the child is given is not a string the parent generated.
+    assert "[Goal]\ncount the lines" in spawn_record["brief"]
     assert spawn_record["content"]["response"]["content"] == {"count": 7}
 
 
 def test_spawn_failure_becomes_an_error_message(tmp_path):
-    agent, model = make_agent(tmp_path, [], max_steps=2)
+    # Five steps for the parent and two allocated to the child, because since
+    # 0.0.8c the child's are the parent's: at max_steps=2 the spawn would take
+    # the whole run.
+    agent, model = make_agent(tmp_path, [], max_steps=5)
     model.script = [
-        step(tool_use("spawn", prompt="do it", return_schema={"type": "object"}, register_id=9)),
+        step(
+            tool_use(
+                "spawn", goal="do it", check="true", max_steps=2,
+                return_schema={"type": "object"}, register_id=9,
+            )
+        ),
         step(text("child idles")),
         step(text("child idles")),
         step(write_response(agent, {"ok": True})),
@@ -280,7 +294,7 @@ def test_spawn_failure_becomes_an_error_message(tmp_path):
     # The parent sees the failure in register 0, and the handoff file first —
     # what the child had established, and how to continue it.
     dump = model.requests[3]["messages"][0]["content"]
-    assert "error: sub-agent" in dump and "spawn(resume=" in dump
+    assert "error: sub-agent" in dump and "resume(agent_id=" in dump
     handoff = agent.workspace.root / stored["response"]["handoff"]
     assert handoff.exists()
     note = json.loads(handoff.read_text())
@@ -291,14 +305,52 @@ def test_an_agent_at_the_depth_floor_is_not_offered_spawn(tmp_path):
     """A tool that cannot succeed is not in the list — and says why if asked."""
     agent, model = make_agent(tmp_path, [], max_depth=0)
     model.script = [
-        step(tool_use("spawn", prompt="go deeper", return_schema={"type": "object"}, register_id=9)),
+        step(
+            tool_use(
+                "spawn", goal="go deeper", check="true",
+                return_schema={"type": "object"}, register_id=9,
+            )
+        ),
         step(write_response(agent, {"ok": True})),
     ]
     agent.run()
 
-    assert [t["name"] for t in agent.tools.specs()] == ["bash", "load", "set", "set_target"]
+    assert [t["name"] for t in agent.tools.specs()] == [
+        "bash", "load", "set", "set_target", "lookup",
+    ]
     error = agent.trajectory.read()[1]["observation"]["results"][0]["error"]
-    assert "no `spawn` tool at depth 0" in error and "max_depth=0" in error
+    # 0.0.8c §6: the refusal names whose allowance ran out, not a constant the
+    # scaffold picked. Nobody set this one but the run, so it says so.
+    assert "no `spawn` at depth 0" in error and "this run allows depth 0" in error
+
+
+def test_the_refusal_says_a_parent_allowed_the_depth_when_a_parent_did(tmp_path):
+    agent, _ = make_agent(tmp_path, [], max_depth=None)
+    child = Agent(
+        config=dataclasses.replace(agent.config, max_depth=1),
+        workspace=agent.workspace,
+        model=agent.model,
+        instruction="a leaf",
+        depth=1,
+        depth_from_parent=True,
+    )
+    assert child.can_spawn is False
+    assert "your parent allowed depth 1" in child.depth_refusal()
+    child.bash.close()
+
+
+def test_no_depth_ceiling_by_default(tmp_path):
+    """0.0.8c §6: the constant is removed, not retuned."""
+    agent, _ = make_agent(tmp_path, [], max_depth=None)
+    deep = Agent(
+        config=agent.config,
+        workspace=agent.workspace,
+        model=agent.model,
+        instruction="far down",
+        depth=9,
+    )
+    assert deep.can_spawn is True
+    deep.bash.close()
 
 
 def test_a_child_at_the_floor_loses_spawn_but_its_parent_keeps_it(tmp_path):

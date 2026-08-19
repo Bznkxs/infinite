@@ -130,6 +130,7 @@
   }
   .call .tool { font-weight: 600; }
   .call .reg { color: var(--muted); }
+  .call .goal { font-weight: 600; }
   .call .link { margin-left: auto; background: none; border: 0; color: var(--accent);
     font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; }
   .call > .body { padding: 4px 12px 10px; }
@@ -463,8 +464,19 @@ function renderCall(call, t) {
     body.append(el("p", { text: `${input.path}  ·  from char ${n(input.start)}` }));
   else if (call.name === "set") body.append(codeBlock(String(input.value ?? "")));
   else if (call.name === "set_target") body.append(codeBlock(String(input.content ?? "")));
-  else if (call.name === "spawn")
-    body.append(codeBlock(input.prompt), fold("return schema", [], [codeBlock(json(input.return_schema))]));
+  else if (call.name === "lookup") body.append(el("p", { text: input.symbol }));
+  else if (call.name === "resume")
+    body.append(el("p", { text: `${input.agent_id}  ·  ${n(input.max_steps)} more steps` }));
+  else if (call.name === "spawn") {
+    // 0.0.8c: the brief is names, not prose, so it is shown as names.
+    const rows = [el("p", { class: "goal", text: input.goal ?? input.prompt ?? "" })];
+    if (input.goal_file) rows.push(el("p", { class: "reg", text: `goal file: ${input.goal_file}` }));
+    if (input.write) rows.push(el("p", { class: "reg", text: `write: ${input.write}` }));
+    if (input.check) rows.push(el("p", { class: "reg", text: `check: ${input.check}` }));
+    if (input.read?.length) rows.push(el("p", { class: "reg", text: `read: ${input.read.join(", ")}` }));
+    if (input.max_steps != null) rows.push(el("p", { class: "reg", text: `${n(input.max_steps)} steps` }));
+    body.append(...rows, fold("return schema", [], [codeBlock(json(input.return_schema))]));
+  }
   else body.append(codeBlock(json(input)));
   body.append(renderResult(call.result, call.name));
   return el("div", { class: "call" }, [head, body]);
@@ -485,10 +497,13 @@ function renderResult(result, name) {
   }
   if (name === "set" || name === "set_target")
     return el("p", { class: "reg", text: result.status || "" });
-  if (name === "spawn") {
+  if (name === "lookup")
+    return fold(`${n(result.matches)} match(es)`, [], [codeBlock(result.content || "")]);
+  if (name === "spawn" || name === "resume") {
     const content = result.content || {};
+    const cost = result.cost != null ? `${n(result.cost)} steps of the parent's` : "";
     return fold(`sub-agent response — ${content.response?.file || ""}`,
-      [content.trajectory || ""], [codeBlock(json(content.response))]);
+      [content.trajectory || "", cost], [codeBlock(json(content.response))]);
   }
   return fold("result", [], [codeBlock(json(result))]);
 }

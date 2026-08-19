@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from .agent import Agent  # importing the package also loads .env
-from .config import SHORT, WIDE_OUTPUT, Config
+from .config import FRAME, SHORT, WIDE_OUTPUT, Config
 from .firewall import FirewallUnavailable
 from .model import AnthropicModel
 from .workspace import Workspace
@@ -22,6 +22,20 @@ def steps_arg(value: str) -> int | None:
     number = int(value)
     if number < 1:
         raise argparse.ArgumentTypeError("max-steps must be at least 1, or 'none'")
+    return number
+
+
+def depth_arg(value: str) -> int | None:
+    """`--max-depth 2` or `--max-depth none`, which is the default since 0.0.8c.
+
+    A user is a parent and should get any control a parent has, so the ceiling
+    stays available; what changed is that the scaffold no longer picks one.
+    """
+    if value.strip().lower() in ("none", "unlimited", "inf"):
+        return None
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("max-depth must not be negative, or 'none'")
     return number
 
 
@@ -126,6 +140,47 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--frame",
+        action="store_true",
+        help=(
+            "0.0.8: 0.0.7i's input with a 4096-char canvas, a structured brief for "
+            "`spawn` whose `check` the scaffold runs at the pop, a child's steps charged "
+            "to its parent, no depth ceiling, optional destination registers, `lookup`, "
+            "and the registers reachable from the shell."
+        ),
+    )
+    parser.add_argument(
+        "--check",
+        help=(
+            "A command that decides whether this run's work is done. The response is "
+            "refused until it succeeds. This is what a parent gives a child; a user is "
+            "a parent."
+        ),
+    )
+    parser.add_argument(
+        "--no-lookup",
+        action="store_true",
+        help="Drop the `lookup` tool and the memo table (0.0.8's 7.1), for a comparison.",
+    )
+    parser.add_argument(
+        "--no-shell-registers",
+        action="store_true",
+        help="Do not put the registers in the shell as $R0.. and $REGDIR (0.0.8a §3).",
+    )
+    parser.add_argument(
+        "--no-charge",
+        action="store_true",
+        help=(
+            "Do not debit a parent for its children's steps (0.0.8c §5), which is "
+            "0.0.7j's accounting: visible, not charged."
+        ),
+    )
+    parser.add_argument(
+        "--no-checks",
+        action="store_true",
+        help="Do not run a child's `check` at the pop; it becomes advice (0.0.8c §3).",
+    )
+    parser.add_argument(
         "--wide-output",
         action="store_true",
         help=(
@@ -155,7 +210,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Step budget for this run; on resume, how many more steps to allow. "
         "'none' for no cap.",
     )
-    parser.add_argument("--max-depth", type=int)
+    parser.add_argument(
+        "--max-depth",
+        type=depth_arg,
+        help=(
+            "The deepest `spawn` may go. 'none' (the default) means the scaffold has no "
+            "opinion and depth is bounded by the budget instead."
+        ),
+    )
     parser.add_argument("-q", "--quiet", action="store_true", help="Only print the result.")
     return parser
 
@@ -168,7 +230,7 @@ def collect_overrides(args) -> dict:
         "workspace_tokens": args.workspace_tokens,
         "max_register_length": args.max_register_length,
         "max_canvas_length": args.max_canvas_length,
-        "max_depth": args.max_depth,
+
         "summary_target_chars": args.summary_target_chars,
         "summary_max_attempts": args.summary_max_attempts,
         "summary_model": args.summary_model,
@@ -177,9 +239,12 @@ def collect_overrides(args) -> dict:
     }
     overrides = {k: v for k, v in named.items() if v is not None}
     # The preset first, so anything named on the command line still wins.
-    if args.short or args.wide_output:
-        preset = WIDE_OUTPUT if args.wide_output else SHORT
+    if args.short or args.wide_output or args.frame:
+        preset = FRAME if args.frame else WIDE_OUTPUT if args.wide_output else SHORT
         overrides = {**preset, **overrides}
+    # max_depth is like max_steps: None is a meaningful value, so key off the flag.
+    if "--max-depth" in sys.argv:
+        overrides["max_depth"] = args.max_depth
     # max_steps is special: None is a meaningful value, so key off the raw flag.
     if "--max-steps" in sys.argv:
         overrides["max_steps"] = args.max_steps
@@ -189,6 +254,14 @@ def collect_overrides(args) -> dict:
         overrides["summary"] = False
     if args.no_firewall:
         overrides["firewall"] = False
+    if args.no_lookup:
+        overrides["lookup"] = False
+    if args.no_shell_registers:
+        overrides["registers_as_files"] = False
+    if args.no_charge:
+        overrides["charge_children"] = False
+    if args.no_checks:
+        overrides["run_checks"] = False
     if args.allow_read:
         overrides["readable_dirs"] = tuple(args.allow_read)
     return overrides
@@ -238,6 +311,7 @@ def main(argv: list[str] | None = None) -> int:
                 workspace=workspace,
                 model=AnthropicModel(config),
                 instruction=instruction,
+                check=args.check,
                 return_schema=(
                     json.loads(Path(args.schema).read_text(encoding="utf-8"))
                     if args.schema

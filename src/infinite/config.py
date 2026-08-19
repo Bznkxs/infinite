@@ -131,12 +131,22 @@ class Config:
     # Loop / recursion budgets. max_steps is per run segment: a resumed run
     # gets a fresh allowance. None means no cap.
     max_steps: int | None = 40
-    #: How deep `spawn` may go. 0.0.7a cut it from 3 to 1 — the root fans out to
-    #: leaves and no further. A deeper tree serialises (every ancestor sits
-    #: blocked on one descendant, because spawn is synchronous) and every level
-    #: pays to brief the next one, which in 0.0.6's run meant a 42KB contract
-    #: document and 536 lines of actual code.
-    max_depth: int = 1
+    #: The deepest `spawn` may go, as an absolute depth: an agent at `depth`
+    #: may spawn while `depth < max_depth`. None means the scaffold has no
+    #: opinion, which is 0.0.8c's position — a ceiling is a property of the
+    #: subtree and only the agent standing in it knows anything about the
+    #: subtree. 0.0.7a set it to 1 because deep trees serialise and every level
+    #: paid to brief the next; the second is what the structured brief is for,
+    #: and the first is a resource cost that `charge_children` now prices. It
+    #: stays settable because a user is a parent and should get what a parent
+    #: gets — an experiment can still pin it.
+    max_depth: int | None = None
+    #: A child's steps come out of its parent's remaining budget (0.0.8c §5).
+    #: Without this a parent's counter moves by one however many steps its child
+    #: spends, so commissioning a hundred-step digest and running one `grep`
+    #: cost the same. False restores 0.0.7j's accounting, for measuring the
+    #: difference.
+    charge_children: bool = True
     #: How many children of one step may run at the same time. 0.0.7f made a
     #: step's `spawn` calls concurrent — they were asked for together, and the
     #: scaffold ran them one after another — but a root that fans out five ways
@@ -171,6 +181,23 @@ class Config:
     # Tool limits
     bash_timeout: float = 60.0
     max_load_bytes: int = 20 * 1024 * 1024
+    #: 0.0.8a §3: the register file is synced to `$REGDIR/0 … $REGDIR/N` and
+    #: `$R0 … $RN` around every `bash` call, so a value can move from a register
+    #: into a command, into another register, or out of a computation without
+    #: passing through a generation. False is 0.0.7's behaviour, for measuring
+    #: what transit actually costs.
+    registers_as_files: bool = True
+    #: 7.1: `lookup(symbol)` over an index the scaffold maintains, so forty
+    #: facts cost forty lines rather than forty pages.
+    lookup: bool = True
+    #: How many index lines one `lookup` may return.
+    lookup_max_matches: int = 24
+    #: 0.0.8c §3: the scaffold runs a child's `check` command when the child
+    #: writes its response, and a response that fails it is refused. False
+    #: makes `check` advisory, for measuring what enforcing it buys.
+    run_checks: bool = True
+    #: Seconds a `check` command may take before it is called failed.
+    check_timeout: float = 300.0
 
     # Firewall: writes are always confined to the workspace; these are the
     # extra directories the agent may *read*. Empty means workspace-only.
@@ -187,8 +214,27 @@ class Config:
         """
         content = sum(self.register_limit(i) for i in range(self.num_registers))
         # `--- register 10 (2560/2560 chars; canvas) ---` and a newline, plus
-        # `[Step] step 500 of 500 (1 left, including this one)` and `[Registers]`.
-        return content + 56 * self.num_registers + 80
+        # `[Registers]` and the `[Step]` line at its longest — depth, the step
+        # counter, what children have debited, the run-wide total and the
+        # last-steps warning, all at once.
+        return content + 56 * self.num_registers + 260
+
+    @property
+    def working_set_chars(self) -> int:
+        """What the *agent* controls, which is the number 7.4 asks to be reported.
+
+        The free registers, the canvas, and the target — every place a value the
+        agent chose can sit. Registers 0, 1, 3 and 4 are written by the system
+        and are not memory the agent can commit against, so they are not counted
+        even though the model pays for them. At 0.0.7g this came to 3,280 chars
+        against a request of 7,453 tokens: the scaffold explaining itself was
+        43% of it and the agent had 16%.
+        """
+        free = sum(
+            self.register_limit(i)
+            for i in range(self.num_special_registers, self.num_registers)
+        )
+        return free + self.register_limit(TARGET_REGISTER)
 
     def context_tokens(self, fixed_chars: int) -> dict[str, int]:
         """How big one generation can get, given the unchanging half of it.
@@ -200,12 +246,18 @@ class Config:
         """
         chars = fixed_chars + self.dump_chars
         input_tokens = int(chars / CHARS_PER_TOKEN)
+        working_set = self.working_set_chars
         return {
             "fixed_chars": fixed_chars,
             "dump_chars": self.dump_chars,
             "input_tokens": input_tokens,
             "output_tokens": self.workspace_tokens,
             "total_tokens": input_tokens + self.workspace_tokens,
+            # 7.4: "it should be reported as *usable working set*, not just
+            # total". A scaffold that grows its own prose to buy the agent room
+            # should have to show both numbers next to each other.
+            "working_set_chars": working_set,
+            "working_set_tokens": int(working_set / CHARS_PER_TOKEN),
         }
 
     @property
@@ -293,6 +345,12 @@ class Config:
             raise ValueError("api_max_retries must not be negative")
         if self.spawn_workers < 1:
             raise ValueError("spawn_workers must be at least 1")
+        if self.max_depth is not None and self.max_depth < 0:
+            raise ValueError("max_depth must not be negative, or None for no ceiling")
+        if self.lookup_max_matches < 1:
+            raise ValueError("lookup_max_matches must be at least 1")
+        if self.check_timeout <= 0:
+            raise ValueError("check_timeout must be positive")
         if self.max_context_tokens is not None:
             if self.max_context_tokens < 1:
                 raise ValueError("max_context_tokens must be at least 1, or None")
@@ -343,7 +401,35 @@ SHORT = dict(
     #: Under register 4, with the headroom that makes the overshoot free.
     summary_target_chars=600,
     summary_max_tokens=640,
-    max_context_tokens=8000,
+    #: 8,000 at 0.0.7g. 0.0.8's prose is what moved it: the frame discipline,
+    #: the optional destination, `lookup`, `resume`, and the registers-as-files
+    #: sentence come to about 1,200 tokens of fixed constant that 0.0.7g did not
+    #: pay. The register geometry is unchanged to the character, so this preset
+    #: is still 0.0.7g's *input*; what it is not any more is 0.0.7g's price.
+    max_context_tokens=9000,
+)
+
+
+#: 0.0.8: the frame scaffold. Same input geometry as 0.0.7i to the character
+#: except the canvas, which 0.0.8a §5 argues is the one register a working set
+#: has to land in whole — 1,536 chars holds twenty-five signature lines and the
+#: distance to close was a factor of about 1.5, not of 16. What changes around
+#: it is not size: `spawn` takes a brief a lossy caller can write, the check is
+#: run at the pop, a child's steps come out of its parent's budget, the depth
+#: ceiling is gone, `register_id` is optional, and the registers are files the
+#: shell can reach.
+FRAME = dict(
+    num_registers=11,
+    max_register_length=208,
+    max_special_length=1536,
+    max_target_length=704,
+    max_step_half_length=240,
+    #: 0.0.8a §5: nearer 4,096 than 1,536, so one working set fits in one place.
+    max_canvas_length=4096,
+    workspace_tokens=8192,
+    summary_target_chars=600,
+    summary_max_tokens=640,
+    max_context_tokens=18000,
 )
 
 
@@ -357,6 +443,11 @@ SHORT = dict(
 #: inputs are what degrade attention; long outputs are not, so this holds the
 #: input where it was and gives the generation room.
 WIDE_OUTPUT = dict(SHORT, workspace_tokens=8192, max_context_tokens=16000)
+
+
+def frame_config(**overrides) -> "Config":
+    """0.0.8: the frame scaffold."""
+    return Config(**{**FRAME, **overrides})
 
 
 def short_config(**overrides) -> "Config":

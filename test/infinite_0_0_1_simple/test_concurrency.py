@@ -159,10 +159,17 @@ def write_response(agent, payload):
 def spawn(register_id, **extra):
     return tool_use(
         "spawn",
-        prompt="do a piece of it",
+        goal="do a piece of it",
+        check="true",
         return_schema={"type": "object"},
         register_id=register_id,
         **extra,
+    )
+
+
+def resume(register_id, agent_id, max_steps):
+    return tool_use(
+        "resume", agent_id=agent_id, max_steps=max_steps, register_id=register_id
     )
 
 
@@ -170,7 +177,7 @@ def spawn(register_id, **extra):
 def test_the_spawns_of_one_step_run_at_the_same_time(tmp_path):
     agent, model = make_agent(tmp_path, [], child_delay=0.4, summary=False)
     model.script = [
-        step(spawn(6), spawn(7), spawn(8)),
+        step(spawn(6, max_steps=1), spawn(7, max_steps=1), spawn(8, max_steps=1)),
         step(write_response(agent, {"ok": True})),
     ]
     clock = time.monotonic()
@@ -191,7 +198,10 @@ def test_the_spawns_of_one_step_run_at_the_same_time(tmp_path):
 def test_no_more_children_at_once_than_spawn_workers(tmp_path):
     agent, model = make_agent(tmp_path, [], child_delay=0.2, spawn_workers=2, summary=False)
     model.script = [
-        step(spawn(6), spawn(7), spawn(8), spawn(9)),
+        step(
+            spawn(6, max_steps=1), spawn(7, max_steps=1),
+            spawn(8, max_steps=1), spawn(9, max_steps=1),
+        ),
         step(write_response(agent, {"ok": True})),
     ]
     agent.run()
@@ -246,16 +256,24 @@ def test_a_parent_can_bound_its_child(tmp_path):
     record = agent.trajectory.read()[1]["observation"]["results"][0]
     assert record["max_steps"] == 2
     assert record["agent_id"] and record["agent_id"] != agent.agent_id
+    # And what it spent came out of the parent: two steps of the parent's forty.
+    assert record["cost"] == 2
+    assert agent.charged == 2
 
 
-def test_a_child_with_no_budget_of_its_own_inherits_the_parents(tmp_path):
+def test_a_child_with_no_budget_of_its_own_gets_what_is_left_of_the_parents(tmp_path):
+    """0.0.8c §5: the default is not the parent's whole budget but its remainder.
+
+    Before charging, a child that named no budget inherited `max_steps` outright
+    — so a parent on its thirty-ninth step of forty could hand out forty more.
+    """
     agent, model = make_agent(tmp_path, [], max_steps=7, summary=False)
     model.script = [step(spawn(6)), step(write_response(agent, {"ok": True}))]
     agent.run()
 
     child = json.loads(agent.registers.values[6])["trajectory"]
     header = json.loads((agent.workspace.root / child).read_text().splitlines()[0])
-    assert header["config"]["max_steps"] == 7
+    assert header["config"]["max_steps"] == 6  # seven, less the step doing the spawning
 
 
 def test_a_bad_step_budget_is_refused_before_the_child_starts(tmp_path):
@@ -353,7 +371,7 @@ def test_a_child_that_runs_out_leaves_an_account_of_itself(tmp_path):
     note = json.loads(handoff.read_text())
     assert note["steps"] == 2
     assert note["target"] == "read the corpus, then answer"
-    assert note["resume_with"].startswith('spawn(resume="')
+    assert note["resume_with"].startswith('resume(agent_id="')
     # And register 0 names the file before it explains itself.
     assert model.dumps[1].split("---\n")[1].startswith(f"handoff-{note['agent_id']}.json")
 
@@ -381,8 +399,8 @@ def test_a_parent_can_resume_a_child_where_it_stopped(tmp_path):
         return model.script.pop(0) if model.script else step(text("done"))
 
     model.script = [
-        step(spawn(6, max_steps=2)),          # the child runs out
-        step(spawn(7, resume="PLACEHOLDER")),  # rewritten below, once its id is known
+        step(spawn(6, max_steps=2)),                 # the child runs out
+        step(resume(7, "PLACEHOLDER", 3)),           # rewritten below, once its id is known
         step(write_response(agent, {"ok": True})),
     ]
     model.generate = generate
@@ -390,23 +408,31 @@ def test_a_parent_can_resume_a_child_where_it_stopped(tmp_path):
     # The parent cannot know the child's id before it spawns it, so the second
     # step is patched from what the first one returned — which is what a real
     # agent reads out of register 0.
-    real_spawn = agent.tools._spawn
+    real_spawn, real_resume = agent.tools._spawn, agent.tools._resume
 
-    def spawning(call):
-        if call.input.get("resume") == "PLACEHOLDER":
-            call.input["resume"] = agent._last_child
-        result = real_spawn(call)
+    def remember(result):
         agent._last_child = result.record.get("agent_id") or agent._last_child
         return result
 
     agent._last_child = ""
-    agent.tools._spawn = spawning
+    agent.tools._spawn = lambda call: remember(real_spawn(call))
+
+    def resuming(call):
+        if call.input.get("agent_id") == "PLACEHOLDER":
+            call.input["agent_id"] = agent._last_child
+        return remember(real_resume(call))
+
+    agent.tools._resume = resuming
     result = agent.run()
 
     assert result.ok
     # Two segments of the same child: it stopped after step 2 and finished at 3.
     starts = [line.split(" (")[0] for line in seen]
-    assert starts == ["[Step] step 1 of 2", "[Step] step 2 of 2", "[Step] step 4 of 5"]
+    assert starts == [
+        "[Step] depth 1, step 1 of 2",
+        "[Step] depth 1, step 2 of 2",
+        "[Step] depth 1, step 4 of 6",
+    ]
     record = agent.trajectory.read()[2]["observation"]["results"][0]
     assert record["resume"] == record["agent_id"]
     assert record["content"]["response"]["content"] == {"done": True}
@@ -448,6 +474,12 @@ def test_the_step_line_counts_the_run_once_there_is_more_than_one_agent(tmp_path
 
     # Step 1 is the only agent in the run so far, so it says nothing extra.
     assert "this run has spent" not in model.dumps[0]
-    # By step 2 the child has spent four, and the parent can see them.
-    assert "[Step] step 2 of 40 (39 left, including this one); this run has spent 6 steps across 2 agents" in model.dumps[1]
+    # By step 2 the child has spent four, and the parent can see them — and
+    # since 0.0.8c they have come out of its own budget rather than merely
+    # being shown to it.
+    assert (
+        "[Step] depth 0, step 2 of 40 (35 left, including this one; 4 of your budget "
+        "went to children); this run has spent 6 steps across 2 agents"
+    ) in model.dumps[1]
     assert agent.workspace.spent() == (6, 2)
+    assert agent.charged == 4
