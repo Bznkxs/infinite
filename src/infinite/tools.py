@@ -589,6 +589,16 @@ class ToolBox:
                 f"file says where it got to; continue it with "
                 f'resume(agent_id="{result.agent_id}", max_steps=N).'
             )
+            if result.check_failure:
+                # The check is the parent's, and the parent is the only one who
+                # can change it. A child that spent its budget failing one it
+                # could not have passed should say so here.
+                failure = result.check_failure
+                response["check_failure"] = failure
+                status += (
+                    f" Its last check exited {failure['exit_code']}: "
+                    f"`{failure['command']}` — see {failure['file']}."
+                )
         content = {"trajectory": trajectory, "response": response}
         record = {
             **record,

@@ -189,3 +189,49 @@ def test_a_root_can_be_given_a_check_because_a_user_is_a_parent(tmp_path):
     assert result.ok and result.steps == 2
     assert "Your response is refused unless" in built.system_message()
     assert "test -f done.txt" in built.system_message()
+
+
+# --- when the check itself is what is broken -----------------------------
+def test_a_check_that_cannot_run_says_so_rather_than_blaming_the_work(tmp_path):
+    """A parent wrote `python` on a machine that only has `python3`.
+
+    The child then spent its whole budget being told its work was wrong. The
+    check is the parent's and the child cannot change it, so the two failures
+    have to read differently: 126 and 127 are a shell saying the command does
+    not exist, which decides nothing about the work.
+    """
+    built = build_agent(tmp_path, max_steps=3, max_register_length=208)
+    built.check = "definitely-not-a-command --version"
+    built.model.script = [child_writes(built), step(text("stuck"))]
+    result = built.run()
+
+    assert not result.ok
+    assert result.check_failure["exit_code"] == 127
+    note = json.loads(result.handoff_path.read_text())
+    assert note["last_check"]["command"] == "definitely-not-a-command --version"
+    dump = built.model.requests[1]["messages"][0]["content"]
+    # And it fits register 0 whole, which is what 0.0.7b's lesson costs here.
+    assert "that command does not exist here" in dump
+    assert "says nothing about your work" in dump
+    assert built.registers.truncated[0] is False
+
+
+def test_the_parent_is_told_which_check_its_child_died_against(tmp_path):
+    parent = build_agent(
+        tmp_path, max_steps=8, max_register_length=400,
+        max_special_length=600, max_canvas_length=900,
+    )
+    parent.model.script = [
+        step(spawning(check="no-such-binary", max_steps=2)),
+        child_writes(parent),
+        step(text("the child is stuck on a check it cannot pass")),
+        step(tool_use("bash", command="printf '{}' > " + parent.response_path.name)),
+    ]
+    parent.run()
+
+    record = spawn_result(parent)
+    failure = record["content"]["response"]["check_failure"]
+    assert failure["exit_code"] == 127 and failure["command"] == "no-such-binary"
+    # And in register 0, which at a small geometry is all the parent reads.
+    dump = parent.model.requests[-1]["messages"][0]["content"]
+    assert "Its last check exited 127: `no-such-binary`" in dump

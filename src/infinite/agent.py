@@ -47,6 +47,13 @@ from .workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
+#: A shell says 127 when the command does not exist and 126 when it exists and
+#: cannot be run. A check that returns one of those did not decide anything: it
+#: never ran. The child is told so in as many words, because the default
+#: reading of a failed check — "my work is wrong" — is the wrong one here, and
+#: the command is its parent's rather than its own.
+CHECK_DID_NOT_RUN = (126, 127)
+
 NO_TOOL_CALL_NOTICE = (
     "notice: the previous step made no tool call, so nothing changed. Use a tool to make "
     "progress, and write your response file when the work is done."
@@ -162,6 +169,10 @@ class AgentResult:
     #: Written only when the run did not finish: what it was trying to do and
     #: what it had established, for whoever picks it up.
     handoff_path: Path | None = None
+    #: The last check this agent ran, when it failed: the command, the exit
+    #: code and where the output is. A parent whose brief carried an unrunnable
+    #: check should be told that rather than that its child "produced nothing".
+    check_failure: dict[str, Any] | None = None
     #: Steps this segment took, as against `steps`, which counts every segment
     #: on record.
     segment_steps: int = 0
@@ -208,8 +219,13 @@ class Agent:
         #: budget (0.0.8c §5). Written from the spawn threads, so it is locked.
         self.charged = 0
         self._charge_lock = threading.Lock()
-        #: What one failed check said, attached to the step that ran it.
+        #: What one failed check said, attached to the step that ran it and
+        #: then cleared.
         self._last_check: dict[str, Any] | None = None
+        #: The last check result of the whole segment, kept: a child that died
+        #: against a check has nothing to show for it unless the parent — the
+        #: only one who can change the check — is told which one.
+        self._check_result: dict[str, Any] | None = None
         #: Steps already on record; a fresh run starts at 0.
         self.step = resume_from
         #: Where this segment began, so a budget and an allowance can be worked
@@ -968,6 +984,11 @@ class Agent:
             steps=self.step,
             error=error,
             handoff_path=handoff,
+            check_failure=(
+                self._check_result
+                if not ok and (self._check_result or {}).get("exit_code")
+                else None
+            ),
             segment_steps=segment_steps,
             cost=segment_steps + self.charged,
         )
@@ -992,6 +1013,10 @@ class Agent:
                     "summary": self.registers.values[SUMMARY_REGISTER],
                     "last_step": self.registers.values[STEP_REGISTER],
                     "check": self.check,
+                    # A child that died against a check its parent wrote wrongly
+                    # has nothing to show for it unless the parent can see the
+                    # check. The parent is the only one who can change it.
+                    "last_check": self._check_result,
                     "instruction_file": self.workspace.display(self.instruction_path),
                     "trajectory_file": self.workspace.display(self.trajectory.path),
                     "resume_with": f'resume(agent_id="{self.agent_id}", max_steps=N)',
@@ -1064,7 +1089,7 @@ class Agent:
             encoding="utf-8",
         )
         display = self.workspace.display(path)
-        self._last_check = {
+        self._last_check = self._check_result = {
             "command": self.check,
             "exit_code": code,
             "file": display,
@@ -1078,9 +1103,17 @@ class Agent:
             self.agent_id, self.step, code,
         )
         first = next((line for line in output.strip().splitlines()[::-1] if line.strip()), "")
+        # Both of these have to survive register 0, which is 208 chars at the
+        # 0.0.8 geometry, so the path comes first and the prose is short. The
+        # check itself is already in the system message and is not repeated.
+        if code in CHECK_DID_NOT_RUN:
+            return (
+                f"{display}\nerror: check exit {code} — that command does not exist here, "
+                "so it says nothing about your work. Your parent wrote it."
+            )
         return (
-            f"{display}\nerror: your check exited {code}, so the response is refused and "
-            f"you are still working. {first[:200]}"
+            f"{display}\nerror: check exit {code}, response refused; fix the work and it "
+            f"is taken as it stands. {first[:100]}"
         )
 
     # --- the summary ---------------------------------------------------
