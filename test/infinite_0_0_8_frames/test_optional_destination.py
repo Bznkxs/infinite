@@ -71,3 +71,33 @@ def test_the_schemas_say_the_destination_is_optional(agent):
             assert "register_id" in required  # the one tool whose job it is
         else:
             assert "register_id" not in required, spec["name"]
+
+
+def test_the_target_is_advertised_at_its_own_length_not_the_wide_one(tmp_path):
+    """A live 0.0.8 run had `set_target` rejected twice for the same reason.
+
+    `max_target_length` splits register 2 from register 4 — 704 against 1,536 at
+    the 0.0.8 geometry — and both the schema and the system message were still
+    quoting the shared number. `set_target` rejects rather than truncates, so an
+    agent told the wrong limit loses the whole write and writes it again.
+    """
+    built = build_agent(
+        tmp_path, max_target_length=200, max_special_length=240, summary=True
+    )
+    try:
+        message = built.system_message()
+        assert "2 holds 200, 4 holds 240" in message
+        spec = next(s for s in built.tools.specs() if s["name"] == "set_target")
+        assert spec["input_schema"]["properties"]["content"]["description"] == (
+            "At most 200 chars."
+        )
+    finally:
+        built.bash.close()
+
+
+def test_a_shared_limit_is_still_said_once(tmp_path):
+    built = build_agent(tmp_path, summary=True)  # no max_target_length: they share
+    try:
+        assert "2 and 4 hold 240" in built.system_message()
+    finally:
+        built.bash.close()

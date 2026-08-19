@@ -25,7 +25,14 @@ from .workspace import Instance
 
 ROOT = Path(__file__).resolve().parent.parent
 RUNS = ROOT / "runs" / "eval"
-PROFILES = {"full": [], "short": ["--short"]}
+PROFILES = {
+    "full": [],
+    "short": ["--short"],
+    "wide": ["--wide-output"],
+    # 0.0.8. Reading is bounded by paging and 7.1-7.3 do not touch depth, so
+    # the benchmarks are here to show that the reading results *do not move*.
+    "frame": ["--frame"],
+}
 
 
 def run_one(instance: Instance, *, profile: str, fresh: bool) -> dict[str, Any]:

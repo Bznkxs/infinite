@@ -134,7 +134,14 @@ def tool_specs(config: Config, *, spawn: bool = True) -> list[dict[str, Any]]:
                 "properties": {
                     "content": {
                         "type": "string",
-                        "description": f"At most {config.max_special_length} chars.",
+                        # The target's own limit, which is not the wide-register
+                        # limit when `max_target_length` splits them: at the
+                        # 0.0.8 geometry it is 704 against 1,536, and a model
+                        # told the wrong number writes to the wrong number and
+                        # has its write rejected whole.
+                        "description": (
+                            f"At most {config.register_limit(config.target_id)} chars."
+                        ),
                     }
                 },
                 "required": ["content"],

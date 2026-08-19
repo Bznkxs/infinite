@@ -3,7 +3,7 @@
 A recursive agent that keeps a fixed-size active context, storing everything
 else in reliable storage while keeping a reference to it.
 
-This repository implements **0.0.7f-simple**: the 0.0.1 scaffold
+This repository implements **0.0.8**: the 0.0.1 scaffold
 ([`docs/InfiniteAgent 0.0.1.md`](docs/InfiniteAgent%200.0.1.md)), plus a
 filesystem firewall, resumable runs and per-step timing
 ([`0.0.2`](docs/InfiniteAgent%200.0.2.md)), plus a target register and an
@@ -27,12 +27,22 @@ dying of one; 0.0.7d on showing the agent its step budget, which nothing in its
 context had ever done; 0.0.7e on telling it what a step costs, after four runs
 spent 1.8 tool calls in each of them; and 0.0.7f on the clock — the summariser
 now runs alongside the next generation instead of between two steps, and the
-children of one step run alongside each other. **0.0.7f's run is where the
+children of one step run alongside each other. **0.0.7f's run is where that
 series ends**: in 2h43m the agent rebuilt all thirteen modules of this scaffold
 from the spec (5,529 lines, a 677-test suite), then ran the rebuild on a 367KB
 Wikipedia article and answered a three-part question about it correctly, in five
 steps. 0.0.7e's run took 17.5 hours to write eleven modules and never reached
 the test.
+
+**0.0.8** is a different diagnosis. [Depth, Volume and
+Width](docs/Depth,%20Volume%20and%20Width.md) closed 0.0.7 by naming the axis a
+fixed context is actually defeated by — not the size of the corpus but the
+number of facts that must be true at once — and three design letters answer it:
+[`0.0.8a`](docs/InfiniteAgent%200.0.8a.md) stops a value having to pass through
+a generation in order to move, [`0.0.8b`](docs/InfiniteAgent%200.0.8b.md) says a
+model operation should be precise at one frame and lossy above it, and
+[`0.0.8c`](docs/InfiniteAgent%200.0.8c.md) makes `spawn` behave like the frame it
+already was. `--frame` is the configuration that carries all of it.
 
 ## The scaffold
 

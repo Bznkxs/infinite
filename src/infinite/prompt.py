@@ -153,11 +153,20 @@ def build_system_message(
         "no context.\n"
         + memo_line
     )
-    wide = (
-        f"{TARGET_REGISTER} and {SUMMARY_REGISTER} hold"
-        if summarizes
-        else f"{TARGET_REGISTER} holds"
-    )
+    # The two wide registers share a limit unless `max_target_length` splits
+    # them, and when it does, saying the shared one is simply wrong: `set_target`
+    # rejects rather than truncates, so an agent told 1,536 against a real 704
+    # loses the whole write and does it again.
+    target_limit = config.register_limit(TARGET_REGISTER)
+    if not summarizes:
+        wide = f"{TARGET_REGISTER} holds {target_limit}"
+    elif target_limit == config.max_special_length:
+        wide = f"{TARGET_REGISTER} and {SUMMARY_REGISTER} hold {config.max_special_length}"
+    else:
+        wide = (
+            f"{TARGET_REGISTER} holds {target_limit}, {SUMMARY_REGISTER} holds "
+            f"{config.max_special_length}"
+        )
 
     return f"""You are an agent running inside InfiniteAgent, a scaffold that keeps your active context to a fixed set of registers. Your working directory is {workspace_root}; paths below are relative to it.
 
@@ -176,7 +185,7 @@ Registers 0-{last}. {first_free}-{last} are yours; 0-{first_free - 1} are writte
 {summary_line}
 
 {shell_registers}
-Lengths: registers {first_free}-{config.canvas_id - 1} hold {config.max_register_length} chars, {wide} {config.max_special_length}, {STEP_REGISTER} holds {config.max_step_half_length} of each half, and {config.canvas_id} is the canvas at {config.max_canvas_length} — the register for long excerpts. Anything longer than its register is cut to fit and tagged `truncated` in the dump; the whole of it is in the result file and the trajectory.
+Lengths: registers {first_free}-{config.canvas_id - 1} hold {config.max_register_length} chars, {wide}, {STEP_REGISTER} holds {config.max_step_half_length} of each half, and {config.canvas_id} is the canvas at {config.max_canvas_length} — the register for long excerpts. Anything longer than its register is cut to fit and tagged `truncated` in the dump; the whole of it is in the result file and the trajectory.
 
 [Working]
 
