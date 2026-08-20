@@ -33,11 +33,11 @@ verdict is:
 That was the brief for 0.0.8d, and it is the second version of it: the first said
 the task turned on *when a run starts writing*, which §4.1 measures and refutes —
 both frames that produced a working module wrote in the last fifth of their
-budget, and so did all three that did it again in §4.9.
+budget, and so did all three that did it again in §4.8.
 
 **Where it ended up is further along than the brief.** The hard task now passes
-three times out of three (§4.9), the writing clause has its first live evidence
-at two scales (§4.8), and for the first time every clause of the Infinite Context
+three times out of three (§4.8), the writing clause has its first live evidence
+at two scales (§4.9), and for the first time every clause of the Infinite Context
 Test has a number against it rather than an argument. What is *not* established is
 why: four things changed at once, and the mechanism this letter is named for
 collected two budget units across those three runs, so it is the least likely
@@ -65,14 +65,14 @@ eval/
   run.py         benchmark harness  (--profile frame, --arm)
   analyse.py     reads §8's measures off a run's trajectories
   benchmarks/width.py   the step_loop probe, as a command rather than a recipe
-  benchmarks/volume.py  the infinite-writing probe (new; never run)
+  benchmarks/volume.py  the infinite-writing probe (new; 2/2, §4.9)
 test/
   infinite_0_0_1_simple/   the 0.0.7 suite, updated
   infinite_0_0_8_frames/   the 0.0.8 suite
 eval/results/
   steploop-0.0.8.json      the five probe arms, distilled (runs/ is gitignored)
   volume-0.0.8d.json       the two infinite-writing rows, likewise
-  width-0.0.8d.json        the three width runs of 4.9, likewise
+  width-0.0.8d.json        the three width runs of 4.8, likewise
 ```
 
 ```bash
@@ -160,7 +160,7 @@ two rulers — compare the character counts.
 | the probe as a harness | `test_width_probe.py`, synthetic corpus | pass |
 | the writing probe | `test_volume_probe.py` (27 tests) | pass |
 | infinite writing, live | `volume` at 120 and 1,200 records, `--profile frame` | **2/2, request flat** |
-| infinite complexity, live | `width` x3 on the 0.0.8d geometry (4.9) | **3/3, request spans 232 tokens** |
+| infinite complexity, live | `width` x3 on the 0.0.8d geometry (4.8) | **3/3, request spans 232 tokens** |
 | the probe pipeline end to end | scripted model, live check, real grade, no API | pass |
 | every arm of every probe is a command the CLI accepts | `test_volume_probe.py` | pass |
 | §4.6's firewall hole | the suite, which is green | fixed |
@@ -355,7 +355,7 @@ Three properties of the price are worth stating, because each was a decision:
   streak, in the handoff, which it can act on because it is the only frame that
   can change the brief.
 
-**Two live runs, and they say three things.** The `volume` rows (§4.8) are the
+**Two live runs, and they say three things.** The `volume` rows (§4.9) are the
 first runs under this mechanism, and they are worth more than the seven frames
 the threshold was fitted to, because they are the real measure rather than a
 proxy and they are a different task.
@@ -383,7 +383,7 @@ nearly killed a run that would have got out anyway, is one A/B —
 `--arm no-stall-charge` against the baseline — and it is the top of §5.
 
 The other four live runs moderate that, and they moderate it a long way. Across
-`volume` row 2 and the three `width` runs of 4.9, the price collected **one
+`volume` row 2 and the three `width` runs of 4.8, the price collected **one
 budget unit, zero, two and zero** — and the notice never fired at all in three of
 them. Over all five runs of this letter the surcharge charged 14 units, and 11 of
 those 14 fell on the single run that spent twelve steps re-reading its own
@@ -484,7 +484,7 @@ actually see change what it does, or is `grep`-before-you-look a habit no
 sentence installs?
 
 **The first re-run says yes, and says it about the specific fact that killed an
-earlier arm.** `width` on the 0.0.8d geometry (4.9) passed with three agents, and
+earlier arm.** `width` on the 0.0.8d geometry (4.8) passed with three agents, and
 all three of them opened by `cat facts.md`. The table they built has five lines
 in it, and these are the first two:
 
@@ -502,7 +502,7 @@ for it.
 
 One run, and the mechanism is a file and a sentence rather than a tool, so
 attribution is soft. But this is the first evidence the memo table does anything,
-and it is the best available candidate for what changed — see 4.9, which rules
+and it is the best available candidate for what changed — see 4.8, which rules
 out the other new mechanism.
 
 ### 4.6 `python3` under the firewall — **fixed**
@@ -546,7 +546,7 @@ the model, which is what the test actually asks. And its second half — stacked
 file reads, several files open with the status of each kept — is a real gap:
 `load(path, start)` is stateless and there is no open-file table anywhere.
 
-### 4.9 The hard task, three times, on this geometry
+### 4.8 The hard task, three times, on this geometry
 
 The width probe is the task 0.0.7 failed four times and 0.0.8 passed twice in
 five arms. `eval.run width --offset 0 -n 3 --profile frame` on the 0.0.8d
@@ -592,7 +592,7 @@ table is the better candidate and 4.5 has the specific evidence.
 So: 3/3 is a result, not a cause. The A/B that separates the causes is §5 item 1,
 and it is now the only thing between this and a finding.
 
-## 4.8 Where the first Design Test actually stands
+### 4.9 Where the first Design Test actually stands
 
 [Design Tests (Top Down)](Design%20Tests%20(Top%20Down).md) opens with the
 Infinite Context Test, in four clauses. Nothing in this project has ever scored
@@ -604,7 +604,7 @@ close.
 | **fixed context** — does not *grow* with the task | `test_fixed_context.py`, four axes; live, five agents at five depths spanned 1,389 tokens | — | **held** |
 | **infinite reading** | `test_the_request_does_not_grow_with_the_size_of_what_is_read`, 4KB to 4MB | 6/6 under `--frame`; a 10M-token BABILong instance in nine steps | **held** |
 | **infinite writing** | `test_the_request_does_not_grow_with_the_size_of_what_is_written`, 10,000 lines | two rows, both 100% correct: **ten times the output and the largest request fell 5.1%** | **held** |
-| **infinite complexity** | more steps do not grow the request | **3 of 3** on the hard task (4.9); largest request spans 232 tokens across them | **held, on one task** |
+| **infinite complexity** | more steps do not grow the request | **3 of 3** on the hard task (4.8); largest request spans 232 tokens across them | **held, on one task** |
 
 **All four clauses now have live evidence, and this is the first time.** That is
 the first Design Test met, on the terms it is written in — with three limits
@@ -628,13 +628,13 @@ was empty for two of the four clauses until this letter.
    it — not a run producing output that needs a generation per unit. The harder
    version is §5 item 4.
 3. **Nothing here is attributed.** 3/3 against 2/5 is four changes at once
-   (4.9). The measurement is sound; the explanation is not in hand.
+   (4.8). The measurement is sound; the explanation is not in hand.
 
 **Infinite writing had no live evidence at all, and nobody noticed.** §4.7 lists
 the two Design Tests with no evidence and this was not on the list, because the
 offline test exists and reads like a result. It is not one: it asserts that
 writing 10,000 lines through `bash` does not move the request, which was never in
-doubt. What has never been run is a task whose *output* is the hard part.
+doubt. What had never been run was a task whose *output* is the hard part.
 
 That probe now exists — `eval/benchmarks/volume.py` — and it has been run, twice,
 which is the point: the claim is not that either run succeeds but that
@@ -709,7 +709,7 @@ Ordered by what each buys, cheapest first.
 Items 0 and 4 are done — 4.6's one line, and 4.1's three tiers. Everything left
 needs an API key, which is why it is a list rather than a result.
 
-1. **Attribute 4.9's 3/3.** The baseline is run; what is missing is the
+1. **Attribute 4.8's 3/3.** The baseline is run; what is missing is the
    comparison. Four things changed at once, and two arms separate them:
    `--arm no-stall-charge` x3 rules the price in or out (it collected two budget
    units across the three baseline runs, so the prior is "out"), and a run with
@@ -725,7 +725,7 @@ needs an API key, which is why it is a list rather than a result.
    mechanism rather than a constant, and it is now cheaper than it was: the
    verdict changing is itself progress (`progress.py` counts it), so a gradient
    check and the stall measure test the same hypothesis from two directions.
-4. **Write the *irreducible* writing probe (4.8).** `volume` is run and the
+4. **Write the *irreducible* writing probe (4.9).** `volume` is run and the
    clause holds, but both rows were won with a twenty-line regex, so what they
    show is that the scaffold holds still while an artefact outgrows it — not that
    a run can keep a fixed context while producing output that needs a generation
