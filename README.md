@@ -3,7 +3,7 @@
 A recursive agent that keeps a fixed-size active context, storing everything
 else in reliable storage while keeping a reference to it.
 
-This repository implements **0.0.8**: the 0.0.1 scaffold
+This repository implements **0.0.8d**: the 0.0.1 scaffold
 ([`docs/InfiniteAgent 0.0.1.md`](docs/InfiniteAgent%200.0.1.md)), plus a
 filesystem firewall, resumable runs and per-step timing
 ([`0.0.2`](docs/InfiniteAgent%200.0.2.md)), plus a target register and an
@@ -402,6 +402,7 @@ pre-v1 context re-derived and labelled as such.
 | `config.py` | Register counts, length limits, budgets |
 | `registers.py` | The register file and its rendering |
 | `prompt.py` | The system message |
+| `progress.py` | What a step left behind, the stall streak, and the `[Stall]` line |
 | `summary.py` | The summariser: its prompts, its length rules, its one call (register 4) |
 | `tools.py` | Tool schemas and handlers |
 | `bash_tool.py` | Persistent bash session (stdout+stderr on one pipe, with a timeout) |
@@ -414,3 +415,27 @@ pre-v1 context re-derived and labelled as such.
 | `viewer/reader.py` | Trajectory scanning and normalization |
 | `viewer/server.py` | Local http server (`infinite-viewer`) |
 | `viewer/index.html` | The dialogue page |
+
+## Documents
+
+`docs/` is the record: what each version set out to do, what it changed, and what
+the runs said about it. [`Writing a
+Version`](docs/Writing%20a%20Version.md) is the convention for new ones — one
+file per version, five numbered sections (aim, modifies, evaluate, results,
+handoff), with the first three written *before* the implementation and the
+experiment and the last two after, as two commits to the same file. The point of
+the split is that a criterion written after the numbers are in is not a
+criterion.
+
+| | |
+| --- | --- |
+| [`Design Tests (Top Down)`](docs/Design%20Tests%20(Top%20Down).md) | The only statement of what "done" means. One page. Start here. |
+| [`Depth, Volume and Width`](docs/Depth,%20Volume%20and%20Width.md) | The diagnosis the 0.0.8 series answers, and the axis a fixed context is actually defeated by. |
+| [`InfiniteAgent 0.0.X.md`](docs/InfiniteAgent%200.0.8d.md) | One per version. A letter (`0.0.8a`) is a version that stands on its own, not a chapter of another. |
+| [`Iterating to 0.0.8d`](docs/Iterating%20to%200.0.8d.md) | The working handoff: problems ranked, what to do next, and the pitfalls that have already cost time. §7 is the reading order for everything above. |
+| [`Trajectory Format`](docs/Trajectory%20Format.md) | What a run writes to disk, field by field. |
+| [`Evaluation`](docs/Evaluation.md) | How the benchmarks are fetched, posed and graded, and what they have scored. |
+| `eval/results/*.json` | Live-run figures, distilled — `runs/` is gitignored, so a number quoted in a document is backed here. |
+
+The documents written before 2026-08-20 predate that convention and are
+deliberately not retrofitted.
