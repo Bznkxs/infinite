@@ -48,10 +48,21 @@ that defeated 0.0.7 four times was implemented and imported in 56 steps with a
 largest request of 8,233 tokens, where the 0.0.7 attempt that managed it at all
 peaked at 23,251; the reading results did not move (six of six, four of them
 faster); and three of five attempts at that module wrote a complete
-implementation against 0.0.7's none-of-four. The axis the letters set out to fix is *not* fixed — what decides
-the task is when a run starts writing, and nothing here makes it start sooner —
-so [`Iterating to 0.0.8d`](docs/Iterating%20to%200.0.8d.md) is where the series
-goes next.
+implementation against 0.0.7's none-of-four.
+
+**0.0.8d** ([`the build note`](docs/InfiniteAgent%200.0.8d.md), and
+[`Iterating to 0.0.8d`](docs/Iterating%20to%200.0.8d.md) for the working list) is
+the iteration with no design letter: a diagnosis read off the trajectories 0.0.8
+had already produced. 0.0.8's own verdict was that the task turns on *when a run
+starts writing* — which the trajectories refute, since both frames that produced
+a working module wrote in the last fifth of their budget. What they turn on is
+whether a step leaves anything behind at all, so the scaffold now measures that,
+says so when a run has stopped, and charges for it. On the far side of it the hard
+task passes **three times out of three**, the writing clause has its first live
+evidence, and every clause of the Infinite Context Test has a number against it
+rather than an argument — with the caveat that four things changed at once and the
+mechanism 0.0.8d is named for collected two budget units across those three runs,
+so it is the least likely cause of its own success.
 
 ## The scaffold
 

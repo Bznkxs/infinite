@@ -690,10 +690,14 @@ Two things about it are worth knowing before reading its results:
   and not about where the characters came from. What separates the two routes is
   measured rather than forbidden: `generated_chars` against the bytes on disk.
 
-The five live runs of this letter cost about 75 minutes of wall clock and 2.3M
-tokens between them, which is the other thing worth writing down: making the
-probes one command each (§1) is what turned "an afternoon per arm" into an
-afternoon for the whole table.
+The five live runs of this letter cost **61 minutes of wall clock and 1.8M tokens**
+between them — 1,615,987 in and 189,188 out — which is the other thing worth
+writing down: making the probes one command each (§1) is what turned "an
+afternoon per arm" into an afternoon for the whole table.
+
+The write-up for all of it is [InfiniteAgent
+0.0.8d](InfiniteAgent%200.0.8d.md) — what shipped, what it cost, and every claim
+in this document scored against the runs.
 
 Credentials come from `.env` — `src/infinite/__init__.py` calls `load_dotenv()`,
 so importing the package is enough and nothing needs exporting, as long as the
@@ -822,7 +826,11 @@ needs an API key, which is why it is a list rather than a result.
    those letters against the runs. §9 is the table to argue with. Its numbers
    were re-derived from the trajectories on 2026-08-19 and several moved; where a
    figure was replaced the note says what the old one was and why it was wrong.
-5. [0.0.7i](InfiniteAgent%200.0.7i.md) and
+5. [0.0.8d](InfiniteAgent%200.0.8d.md) — the build note for this document's own
+   iteration: the diagnosis in §4.1, the mechanism, the five live runs, the first
+   Design Test scored clause by clause, and what the runs said that the design
+   did not. Read it before §5 below, because it is what §5 is left over from.
+6. [0.0.7i](InfiniteAgent%200.0.7i.md) and
    [0.0.7j](InfiniteAgent%200.0.7j.md) — the two that set up 0.0.8, if you want
    the immediate history rather than all of it.
 
