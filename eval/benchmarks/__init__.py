@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from . import babilong, infinitebench, swebench, width
+from . import babilong, infinitebench, swebench, volume, width
 
 REGISTRY = {
     module.NAME: module
-    for module in (babilong, infinitebench, swebench, width)
+    for module in (babilong, infinitebench, swebench, volume, width)
 }

@@ -255,8 +255,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def collect_overrides(args) -> dict:
-    """Only the settings the user actually named, so resume keeps the rest."""
+def collect_overrides(args, argv: list[str] | None = None) -> dict:
+    """Only the settings the user actually named, so resume keeps the rest.
+
+    `argv` is the list `args` was parsed from. Two flags need it because `None`
+    is a meaningful value for them and `argparse` cannot tell "not given" from
+    "given as none" — and reading `sys.argv` instead, which is what this did
+    until 0.0.8d, means the function silently answers about the *process* rather
+    than about its own argument. That is fine for the CLI and wrong for anything
+    that drives it in-process, including the test that checks every arm of every
+    probe is a command the scaffold accepts.
+    """
+    argv = sys.argv if argv is None else argv
     named = {
         "model": args.model,
         "effort": args.effort,
@@ -276,10 +286,10 @@ def collect_overrides(args) -> dict:
         preset = FRAME if args.frame else WIDE_OUTPUT if args.wide_output else SHORT
         overrides = {**preset, **overrides}
     # max_depth is like max_steps: None is a meaningful value, so key off the flag.
-    if "--max-depth" in sys.argv:
+    if "--max-depth" in argv:
         overrides["max_depth"] = args.max_depth
     # max_steps is special: None is a meaningful value, so key off the raw flag.
-    if "--max-steps" in sys.argv:
+    if "--max-steps" in argv:
         overrides["max_steps"] = args.max_steps
     if args.no_thinking:
         overrides["thinking"] = False

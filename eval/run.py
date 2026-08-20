@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import analyse
 from .benchmarks import REGISTRY
 from .workspace import Instance
 
@@ -54,6 +55,32 @@ ARMS: dict[str, list[str]] = {
 }
 
 
+def agent_command(
+    instance: Instance, workspace: Path, *, profile: str, arm: str = "baseline"
+) -> list[str]:
+    """The CLI a person would type, which is the thing being measured.
+
+    Split out so it can be checked against `infinite.main`'s own parser without
+    an API key: the harness is one long argument list, and a flag that the
+    scaffold does not accept is a three-hour run that dies in its first second.
+    """
+    return [
+        sys.executable, "-m", "infinite.main",
+        "-f", str(workspace / "TASK.md"),
+        "-w", str(workspace),
+        "-s", str(workspace / "schema.json"),
+        "--max-steps", str(instance.max_steps),
+        *PROFILES[profile],
+        *ARMS[arm],
+        # Every one of the five 0.0.8 arms had a `check`, and until 0.0.8d the
+        # harness never passed one — so `check_every_step` was inert in every
+        # eval run and a replication through here would not have been one. A
+        # benchmark that states an acceptance command in its `truth` gets it as
+        # its root check.
+        *(["--check", instance.truth["check"]] if instance.truth.get("check") else []),
+    ]
+
+
 def run_one(
     instance: Instance, *, profile: str, fresh: bool, arm: str = "baseline"
 ) -> dict[str, Any]:
@@ -62,15 +89,7 @@ def run_one(
     if hasattr(module, "materialise"):
         module.materialise(instance, workspace)
 
-    command = [
-        sys.executable, "-m", "infinite.main",
-        "-f", str(workspace / "TASK.md"),
-        "-w", str(workspace),
-        "-s", str(workspace / "schema.json"),
-        "--max-steps", str(instance.max_steps),
-        *PROFILES[profile],
-        *ARMS[arm],
-    ]
+    command = agent_command(instance, workspace, profile=profile, arm=arm)
     log = workspace.parent / f"{instance.instance_id}.{profile}.log"
     clock = time.monotonic()
     with log.open("w", encoding="utf-8") as handle:
@@ -128,6 +147,13 @@ def measure(workspace: Path) -> dict[str, Any]:
     steps = agents = 0
     tokens_in = tokens_out = 0
     context = None
+    # The *largest* request, which is the number the Infinite Context Test turns
+    # on: totals grow with the length of a run whatever the geometry does, so a
+    # sum could never have shown the property. And the stall streaks, so a row
+    # says whether the steps it counted were a resource.
+    largest = 0
+    moved: list[bool] = []
+    known = False
     for path in workspace.glob("trajectory-*.jsonl"):
         agents += 1
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -141,18 +167,25 @@ def measure(workspace: Path) -> dict[str, Any]:
                 continue
             steps += 1
             usage = record.get("usage", {})
-            tokens_in += (
+            request = (
                 usage.get("input_tokens", 0)
                 + usage.get("cache_read_input_tokens", 0)
                 + usage.get("cache_creation_input_tokens", 0)
             )
+            tokens_in += request
+            largest = max(largest, request)
             tokens_out += usage.get("output_tokens", 0)
+            if (progress := record.get("progress")) is not None:
+                known = True
+                moved.append(bool(progress.get("moved")))
     return {
         "steps": steps,
         "agents": agents,
         "tokens_in": tokens_in,
         "tokens_out": tokens_out,
+        "max_request_tokens": largest or None,
         "context_ceiling": (context or {}).get("total_tokens"),
+        **analyse.stall_measures(moved if known else None),
     }
 
 
@@ -164,11 +197,18 @@ def report() -> None:
     if not rows:
         print("no results yet")
         return
-    print(f"{'benchmark':14s} {'profile':7s} {'n':>3s} {'correct':>7s} {'steps':>6s} {'ceiling':>8s} {'minutes':>8s}")
-    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    # `largest` is the Infinite Context Test's number and it is a max, not a
+    # mean: a total grows with the length of a run whatever the geometry does, so
+    # only the largest request can show a context that does not grow. `worst` is
+    # 0.0.8d §4.1 — whether the steps counted here were a resource.
+    print(f"{'benchmark':14s} {'profile':7s} {'arm':16s} {'n':>3s} {'correct':>7s} "
+          f"{'steps':>6s} {'largest':>8s} {'ceiling':>8s} {'worst':>6s} {'minutes':>8s}")
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for row in rows:
-        groups.setdefault((row["benchmark"], row["profile"]), []).append(row)
-    for (benchmark, profile), group in sorted(groups.items()):
+        groups.setdefault(
+            (row["benchmark"], row["profile"], row.get("arm") or "baseline"), []
+        ).append(row)
+    for (benchmark, profile, arm), group in sorted(groups.items()):
         # Instances whose environment could not be rebuilt are not scored: a
         # harness that cannot run the official fix has measured nothing.
         gradable = [r for r in group if r.get("environment_ok", True)]
@@ -178,8 +218,13 @@ def report() -> None:
         ceiling = next((r.get("context_ceiling") for r in group if r.get("context_ceiling")), None)
         minutes = sum(r.get("seconds", 0) for r in group) / 60
         note = f"  ({excluded} unreproducible)" if excluded else ""
-        print(f"{benchmark:14s} {profile:7s} {len(gradable):3d} {correct:3d}/{len(gradable):<3d} "
-              f"{steps:6.1f} {str(ceiling or '-'):>8s} {minutes:8.1f}{note}")
+        largest = max((r.get("max_request_tokens") or 0) for r in group) or None
+        worst = max((r.get("longest_stall_streak") or 0) for r in group)
+        known = any(r.get("longest_stall_streak") is not None for r in group)
+        print(f"{benchmark:14s} {profile:7s} {arm:16s} {len(gradable):3d} "
+              f"{correct:3d}/{len(gradable):<3d} {steps:6.1f} "
+              f"{str(largest or '-'):>8s} {str(ceiling or '-'):>8s} "
+              f"{(str(worst) if known else '-'):>6s} {minutes:8.1f}{note}")
 
 
 def main(argv: list[str] | None = None) -> int:

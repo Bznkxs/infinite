@@ -53,6 +53,7 @@ eval/
   run.py         benchmark harness  (--profile frame, --arm)
   analyse.py     reads §8's measures off a run's trajectories
   benchmarks/width.py   the step_loop probe, as a command rather than a recipe
+  benchmarks/volume.py  the infinite-writing probe (new; never run)
 test/
   infinite_0_0_1_simple/   the 0.0.7 suite, updated
   infinite_0_0_8_frames/   the 0.0.8 suite
@@ -66,6 +67,9 @@ python -m eval.analyse runs/<workspace> # what a run actually did
 python -m eval.run babilong --config 1M --split qa2 -n 1 --profile frame
 python -m eval.run width -n 3 --profile frame            # the hard task, x3
 python -m eval.run width -n 3 --profile frame --arm no-stall-charge
+python -m eval.run volume --config 120  --profile frame # writing, and then
+python -m eval.run volume --config 1200 --profile frame # ten times as much
+python -m eval.run --report                             # largest request, worst streak
 ```
 
 Everything 0.0.8 adds has a flag to turn it off, so any of it can be A/B'd:
@@ -140,6 +144,8 @@ two rulers — compare the character counts.
 | stall streaks (0.0.8d, §4.1) | proxy over the 7 frames of the 5 arms | separates pass from fail |
 | progress, the notice, the price | `test_progress.py` (23 tests) | pass |
 | the probe as a harness | `test_width_probe.py`, synthetic corpus | pass |
+| the writing probe | `test_volume_probe.py` (25 tests) | built, never run |
+| every arm of every probe is a command the CLI accepts | `test_volume_probe.py` | pass |
 | §4.6's firewall hole | the suite, which is green | fixed |
 | transit, brief cost | read off trajectories | answered |
 
@@ -452,7 +458,7 @@ close.
 | --- | --- | --- | --- |
 | **fixed context** — does not *grow* with the task | `test_fixed_context.py`, four axes; live, five agents at five depths spanned 1,389 tokens | — | **held** |
 | **infinite reading** | `test_the_request_does_not_grow_with_the_size_of_what_is_read`, 4KB to 4MB | 6/6 under `--frame`; a 10M-token BABILong instance in nine steps | **held** |
-| **infinite writing** | `test_the_request_does_not_grow_with_the_size_of_what_is_written`, 10,000 lines | *nothing* — no live run has ever been graded on how much it produced | **half** |
+| **infinite writing** | `test_the_request_does_not_grow_with_the_size_of_what_is_written`, 10,000 lines | a probe exists as of 0.0.8d and has not been run | **half** |
 | **infinite complexity** | more steps do not grow the request | 2 of 5 arms, n=1 per arm, on the one task | **open** |
 
 Two things follow, and they are the whole of what is left.
@@ -463,13 +469,36 @@ grow, which is a real property and is not the claim. "Complete tasks however
 complicated they are" is a claim about a model working inside the thing, and only
 a live run can speak to it.
 
-**Infinite writing has no live evidence at all, and nobody noticed.** §4.7 lists
-the two Design Tests with no evidence and this is not on the list, because the
+**Infinite writing had no live evidence at all, and nobody noticed.** §4.7 lists
+the two Design Tests with no evidence and this was not on the list, because the
 offline test exists and reads like a result. It is not one: it asserts that
 writing 10,000 lines through `bash` does not move the request, which was never in
-doubt. What has never been run is a task whose *output* is the hard part — a
-model asked to produce far more than a context could hold, graded on whether it
-produced it. That is a cheaper probe than the width one and it is missing.
+doubt. What has never been run is a task whose *output* is the hard part.
+
+That probe now exists — `eval/benchmarks/volume.py` — and has not been run.
+Turn a corpus of records into a card each: the corpus is generated from a seed so
+it is the same on any machine and needs no network, which makes it the one probe
+in the repository that works on a fresh clone. It is built to be run **twice**,
+at 120 records and at 1,200: ten times the output, same geometry, and the claim
+is not that either run succeeds but that `max_request_tokens` does not move
+between the two rows while the output does. That is the shape the reading test
+already uses offline — 4KB against 4MB, one number asserted flat — and it is the
+only shape in which "infinite" means anything measurable.
+
+Two things about it are worth knowing before reading its results:
+
+- **Coverage and accuracy are separate numbers, because they fail separately.** A
+  run that wrote 1,200 cards with the wrong fields proved the writing claim and
+  failed the task; a run that wrote 40 right ones proved nothing about volume.
+  The acceptance command counts cards and cannot see whether they are right,
+  which is §4.3's shape again — a verdict without a gradient — and the grader
+  deliberately does not inherit its blind spot.
+- **A program that emits the file is not cheating, and the grade says which
+  happened.** Any output a grader can check mechanically is output a script could
+  produce, and `bash` is deliberately unbounded (0.0.8b §1) — so an agent that
+  writes a program has passed, because the scaffold's claim is about the context
+  and not about where the characters came from. What separates the two routes is
+  measured rather than forbidden: `generated_chars` against the bytes on disk.
 
 So the first Design Test needs live runs, and this iteration was spent making
 them cost one command instead of an afternoon (§1, `eval.run width`). What it
@@ -504,11 +533,11 @@ needs an API key, which is why it is a list rather than a result.
    mechanism rather than a constant, and it is now cheaper than it was: the
    verdict changing is itself progress (`progress.py` counts it), so a gradient
    check and the stall measure test the same hypothesis from two directions.
-4. **Probe infinite writing (4.8).** The clause with no live evidence, and the
-   cheapest thing on this list. A task whose output is the hard part — produce a
-   document, a dataset, a module far larger than any context — graded on whether
-   it arrived and whether the request moved. Half a day, and it closes a quarter
-   of the first Design Test.
+4. **Run the writing probe (4.8).** Built and never run, and the cheapest thing
+   on this list: `eval.run volume --config 120` then `--config 1200`, and compare
+   the two rows' `largest`. It needs no corpus and no network, so it is also the
+   only item here that a fresh clone can do. It closes a quarter of the first
+   Design Test, or shows why it cannot be closed.
 5. **Decide depth (4.4).** The choice is between a frame surcharge, a reserve a
    parent must keep, and leaving it unlegislated with the sentence doing the
    work. Whichever, it should be settled by running the probe at
@@ -524,6 +553,19 @@ needs an API key, which is why it is a list rather than a result.
 
 ## 6. Pitfalls that cost time
 
+- **Until 0.0.8d the eval harness never passed a `check`.** Every one of the
+  five 0.0.8 arms had one, `check_every_step` is on by default, and a run through
+  `eval.run` got neither — so the heartbeat was inert in every benchmark result
+  in this repository, and a "replication" through the harness would not have been
+  one. `agent_command` passes a benchmark's `truth["check"]` now. A test asserts
+  every arm of every probe is a command `infinite.main` accepts, because a flag
+  the scaffold rejects is a three-hour run that dies in its first second.
+- **`collect_overrides` read `sys.argv`, not its argument.** Two flags need the
+  raw list because `None` is meaningful for them (`--max-depth`, `--max-steps`),
+  and reading the process's argv meant the function answered about the process
+  rather than about what it was given. Harmless for the CLI, wrong for anything
+  driving it in-process — the `depth-1` arm looked like it did nothing. It takes
+  `argv` now.
 - **The summary tests share one fake model across two threads.** Since 0.0.7f
   the summary of step N is written while step N+1 is generated, so `SummaryModel`
   is called from both and every list on it — `script`, `summaries`, `prompts` —
