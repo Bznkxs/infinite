@@ -46,9 +46,10 @@ already was. `--frame` is the configuration that carries all of it.
 
 ## The scaffold
 
-Every step is a *stateless* model call. The only user message is `[Step] step N of
-M` and a dump of the registers — there is no conversation history. Everything else lives on disk and
-is reachable through the tools.
+Every step is a *stateless* model call. The only user message is
+`[Step] depth D, step N of M` and a dump of the registers — there is no
+conversation history. Everything else lives on disk and is reachable through
+the tools.
 
 - **33 registers** (0–32), in three length tiers. Registers 0–4 are special and
   written by the system, and
@@ -78,12 +79,34 @@ is reachable through the tools.
   - registers 2 and 4 hold `max_special_length` (6144) chars — larger than a
     normal register, smaller than the canvas. 3 and 4 truncate; `set_target`
     rejects.
-- **Tools** — `bash(command, register_id)`, `load(path, start, register_id)`,
-  `set(value, register_id)`, `set_target(content)`,
-  `spawn(prompt, return_schema, register_id)`. All but `set_target` write their
-  return information to a destination register, truncated to fit; the full
-  version is in the trajectory (and, for `bash` and `spawn`, in a json result
-  file). No tool may target a special register.
+- **Tools** — `bash(command)`, `load(path, start)`, `set(value, register_id)`,
+  `set_target(content)`, `lookup(symbol)`, `spawn(goal, check, return_schema, …)`
+  and `resume(agent_id, max_steps)`. All but `set` and `set_target` take an
+  **optional** `register_id` for their return information, truncated to fit; the
+  full version is in the trajectory (and, for `bash` and the two recursion
+  tools, in a json result file). No tool may target a special register.
+  Omitting `register_id` discards the payload, which is how a working set
+  survives a step that reads four files — before 0.0.8 the write was
+  unconditional, so a five-call step overwrote all five free registers and the
+  scaffold charged the agent its whole memory for taking its own batching advice.
+- **The registers are files** — around every `bash` call the register file is
+  written to `$REGDIR/0 … $REGDIR/N` and exported as `$R0 … $RN`, and read back
+  afterwards: a file the command wrote becomes that register, truncated and
+  tagged exactly as a tool result is. So `cp $REGDIR/5 $REGDIR/6`,
+  `grep -n "$R5" src/*.py > $REGDIR/6` and `sed -n 1,40p "$R5" > $REGDIR/6` are
+  copy, register-to-register and deref-copy, and none of them passes through a
+  generation. Registers 0-4 are read-only and a write to one is refused on the
+  way back. It lives in the agent's own scratch directory, so neither an `ls` of
+  the work nor the agent's own `rm` reaches it
+  ([`0.0.8a`](docs/InfiniteAgent%200.0.8a.md)).
+- **`lookup` and the memo table** — `lookup(symbol)` answers with one line per
+  definition, out of an AST index the scaffold keeps over the workspace's Python
+  and reparses per changed file. Given a path or a dotted module name it returns
+  the whole surface of that module instead, which is what a caller actually
+  needs to call into one. What it resolves is appended to `facts.md`, the run's
+  memo table, shared by every agent in the workspace and queried with `grep` —
+  the artefact five runs kept reaching for as a prose digest, in the form the
+  work wants.
 - **Workspace** — at most `workspace_tokens` generated per step. Over that, the
   generation is cut off, saved to the trajectory, no tool calls run, and
   register 1 flips to `True`.
@@ -91,22 +114,33 @@ is reachable through the tools.
   — the system message, the tool schemas, the fullest possible register dump,
   and the output cap — logs it, and records it in its trajectory header. Setting
   `max_context_tokens` turns that into a ceiling the run refuses to start over.
-  0.0.7f's own geometry comes to 46,684 tokens; **`--short` is the same scaffold
-  under 8,000** ([`0.0.7g`](docs/InfiniteAgent%200.0.7g.md)), reached by
-  compressing the fixed half of every request rather than the working space —
-  and that is where the accounting for the whole series lives.
+  0.0.7f's own geometry comes to 46,684 tokens; **`--short` is 0.0.7g's input**
+  ([`0.0.7g`](docs/InfiniteAgent%200.0.7g.md)), reached by compressing the fixed
+  half of every request rather than the working space — and that is where the
+  accounting for the whole series lives. Since 0.0.8 the budget also reports
+  `working_set_chars`: the free registers, the canvas and the target — what the
+  *agent* controls, as against what the request costs. At 0.0.7g that was 3,280
+  characters of a 7,453-token request; `--frame` makes it 5,840 of ~16,400.
 - **Two budgets** — the input geometry and the output cap are separate
   resources. Reading is bounded by paging and is indifferent to the cap; writing
   tracks it almost exactly (9.5 lines of code a step at 16,384 tokens, 1.3 at
   1,920). `--wide-output` keeps `--short`'s 6,063-token input and gives the
   generation 8,192 ([`0.0.7i`](docs/InfiniteAgent%200.0.7i.md)).
-- **What the run has spent** — once a run has more than one agent, the `[Step]`
-  line adds `this run has spent N steps across M agents`, because a parent's own
-  counter moves by one however many steps its child spends
-  ([`0.0.7j`](docs/InfiniteAgent%200.0.7j.md)).
+- **What the run has spent** — the `[Step]` line opens with the agent's depth,
+  says how much of its budget went to children, and once a run has more than one
+  agent adds `this run has spent N steps across M agents`
+  ([`0.0.7j`](docs/InfiniteAgent%200.0.7j.md) made the price visible;
+  [`0.0.8c`](docs/InfiniteAgent%200.0.8c.md) made it charged).
+- **The invariant** — four sentences of system message, because a recommendation
+  about how to work is a sentence and not a tool: hold one goal at a time and be
+  precise about it, lossy about why you are here, and hold nothing about what is
+  beside it; descend at a working-set boundary and not otherwise; end work with a
+  machine check ([`0.0.8b`](docs/InfiniteAgent%200.0.8b.md)).
 - **Unfinished children** — an agent that stops without a response writes
-  `handoff-<id>.json` saying what it had established, and a parent can continue
-  it with `spawn(resume="<id>", max_steps=N)` instead of starting again. A
+  `handoff-<id>.json` saying what it had established — including the check it
+  was failing, which is the parent's and only the parent can change — and a
+  parent can continue it with `resume(agent_id="<id>", max_steps=N)` instead of
+  starting again. A
   generation cut off at the token cap now runs the calls it had finished
   ([`0.0.7h`](docs/InfiniteAgent%200.0.7h.md)).
 - **Firewall** — the bash session runs inside an OS sandbox (seatbelt on macOS,
@@ -145,14 +179,42 @@ is reachable through the tools.
 
 `spawn` creates a fresh agent in the same workspace with its own registers,
 workspace budget, and trajectory — the recursion that keeps a sub-task's
-intermediate context out of the parent's registers. It reaches `max_depth` (1)
-levels: an agent at the floor is not offered the tool at all, since a tool that
-cannot succeed should not be in the list. Several `spawn` calls in one step run
-**at the same time**, `spawn_workers` (4) at once, so a fan-out costs the slowest
-child rather than the sum of them; their registers are written afterwards in the
-order the model asked, so a concurrent step leaves the register file where a
-serial one would. A child takes the parent's step budget unless the call gives it
-a `max_steps` of its own, and what it spent comes back with its answer.
+intermediate context out of the parent's registers.
+[`0.0.8c`](docs/InfiniteAgent%200.0.8c.md) makes it behave like the frame it
+already was:
+
+- **The brief is names, not prose.** `goal` (one sentence), `read` (where to
+  start, a pointer set and not a permission set), `write`, `check`, and
+  `goal_file` for anything longer — the scaffold renders them into the child's
+  instruction. A parent is the lossy frame by construction, so the field that
+  asked it for a precise instruction asked for something it could not supply,
+  and briefs came out either as 0.0.6's 42KB contract document or as one vague
+  paragraph.
+- **The goal, the destination and the check are in the child's system message**,
+  not only in its instruction file. They are the one thing 0.0.8b's invariant
+  says must be true at every model call, and a 0.0.8 child whose goal was only a
+  file spent 27 of its 30 steps re-reading it.
+- **`check` is required, with `true` as an explicit opt-out.** The scaffold runs
+  it when the child writes its response; a response that fails it is refused,
+  the reason lands in register 0, and the child keeps working. A shell's 126 or
+  127 — the command does not exist — reads differently from a check that ran and
+  said no, because that check is the parent's and the child cannot change it.
+- **A child's steps come out of its parent's budget**, transitively, so
+  `max_steps` is an allocation rather than a wish and the `[Step]` line says how
+  much of the budget went to children. An allocation larger than what is left is
+  cut to it.
+- **The scaffold has no opinion about depth.** `max_depth` is None: the agent
+  sees its own depth on the `[Step]` line, a parent may pass its children an
+  allowance, and the refusal at a floor names whose allowance ran out. What
+  bounds a runaway chain is that its steps are charged. `--max-depth` is still
+  there, because a user is a parent and should get any control a parent has.
+- **`resume(agent_id, max_steps)`** continues a child that ran out, keeping its
+  registers, its files, its check and its step count.
+
+Several `spawn` calls in one step run **at the same time**, `spawn_workers` (4)
+at once, so a fan-out costs the slowest child rather than the sum of them; their
+registers are written afterwards in the order the model asked, so a concurrent
+step leaves the register file where a serial one would.
 
 The summariser behind register 4 is *not* one of those. It is a single
 tool-less generation: previous summary and one step in, new summary out, with no
@@ -206,7 +268,7 @@ Register geometry is inherited from the original run — only budgets and the
 model can be changed across the seam.
 
 ```bash
-uv run pytest test/infinite_0_0_1_simple    # offline: the model is scripted
+uv run pytest test    # offline: the model is scripted
 ```
 
 ## What a fixed context can and cannot do
