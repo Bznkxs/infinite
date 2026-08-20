@@ -216,6 +216,23 @@ class Config:
     #: eight and nine. At 3 the line is rare in a healthy run and loud in a
     #: livelock, which is the sensitivity a notice wants.
     stall_notice: int | None = 3
+    #: 0.0.8d §4.1, tier three: extra steps of budget charged for each stalled
+    #: step from `stall_notice` onward. 0 turns it off.
+    #:
+    #: `charge_children` is the precedent and the argument. 0.0.8c made a child's
+    #: steps cost the parent that commissioned them, and that is the one
+    #: mechanism in the whole series the runs show an agent responding to — the
+    #: pass-through cascade terminated on budget. A livelock is the same failure
+    #: in one frame instead of four: the run keeps buying steps and none of them
+    #: is worth anything. So it is priced the same way rather than capped, which
+    #: is 0.0.8c §6's rule — the scaffold has no opinion about the shape of the
+    #: work, only about the resource it costs.
+    #:
+    #: The threshold is what keeps this from taxing a strategy that works.
+    #: Reading four files to decide is a stall and the system message asks for
+    #: it; three in a row is free. On the five 0.0.8 arms this prices health at
+    #: about one step in fifty and a livelock at one in four.
+    stall_surcharge: int = 1
 
     # Firewall: writes are always confined to the workspace; these are the
     # extra directories the agent may *read*. Empty means workspace-only.
@@ -378,6 +395,10 @@ class Config:
             raise ValueError("max_depth must not be negative, or None for no ceiling")
         if self.check_timeout <= 0:
             raise ValueError("check_timeout must be positive")
+        if self.stall_notice is not None and self.stall_notice < 1:
+            raise ValueError("stall_notice must be at least 1, or None for no notice")
+        if self.stall_surcharge < 0:
+            raise ValueError("stall_surcharge must not be negative")
         if self.check_live_seconds <= 0:
             raise ValueError("check_live_seconds must be positive")
         if self.max_context_tokens is not None:

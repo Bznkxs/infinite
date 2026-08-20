@@ -1,6 +1,7 @@
 """Register 4: the running summary, and the one generation that keeps it."""
 
 import json
+import threading
 
 from infinite import summary as summary_module
 from infinite.agent import Agent
@@ -54,6 +55,11 @@ class SummaryModel:
         self.requests: list[dict] = []
         #: The user message of each summary call, in order.
         self.prompts: list[str] = []
+        #: Since 0.0.7f the summary of step N is written *while* step N+1 is
+        #: generated, so this one object is called from two threads and every
+        #: list on it is shared between them. Without this the suite failed about
+        #: one run in five, in whichever summary test lost the race.
+        self._lock = threading.Lock()
 
     def generate(
         self, *, system, tools, messages, max_tokens, model=None, effort=None, thinking=None
@@ -67,13 +73,16 @@ class SummaryModel:
             "effort": effort,
             "thinking": thinking,
         }
-        self.requests.append(request)
-        if not is_summary_call(request):
-            entry = self.script.pop(0) if self.script else step(text("script exhausted"))
-            return entry(request) if callable(entry) else entry
+        with self._lock:
+            self.requests.append(request)
+            if not is_summary_call(request):
+                entry = (
+                    self.script.pop(0) if self.script else step(text("script exhausted"))
+                )
+                return entry(request) if callable(entry) else entry
 
-        self.prompts.append(messages[0]["content"])
-        value = self.summaries.pop(0) if self.summaries else "a summary"
+            self.prompts.append(messages[0]["content"])
+            value = self.summaries.pop(0) if self.summaries else "a summary"
         if isinstance(value, Exception):
             raise value
         return step(text(value)) if value is not None else step()

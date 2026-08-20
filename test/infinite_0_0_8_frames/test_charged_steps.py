@@ -45,7 +45,10 @@ def test_what_a_child_spends_comes_out_of_its_parent(tmp_path):
 
 def test_a_parent_that_spends_its_run_on_children_runs_out(tmp_path):
     """The incentive, made real: a fan-out you cannot afford ends the segment."""
-    parent = build_agent(tmp_path, max_steps=5)
+    # `stall_surcharge=0`: this measures charging, and an idling FakeModel
+    # child is a stand-in for a busy one rather than a livelock. Leaving
+    # 0.0.8d's price on would measure two mechanisms at once — §6's rule.
+    parent = build_agent(tmp_path, max_steps=5, stall_surcharge=0)
     parent.model.script = [step(spawning(max_steps=4))] + [idle()] * 4
     result = parent.run()
 
@@ -117,7 +120,10 @@ def test_the_dump_says_what_went_to_children(tmp_path):
 
 def test_charging_can_be_turned_off_to_measure_what_it_buys(tmp_path):
     """0.0.7j's accounting: the price is shown, and not charged."""
-    parent = build_agent(tmp_path, max_steps=5, charge_children=False)
+    # `stall_surcharge=0`: this measures charging, and an idling FakeModel
+    # child is a stand-in for a busy one rather than a livelock. Leaving
+    # 0.0.8d's price on would measure two mechanisms at once — §6's rule.
+    parent = build_agent(tmp_path, max_steps=5, charge_children=False, stall_surcharge=0)
     parent.model.script = [
         step(spawning(max_steps=4)),
         idle(), idle(), idle(), idle(),

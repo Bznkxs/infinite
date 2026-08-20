@@ -65,6 +65,13 @@ IGNORED_FILES = re.compile(r"^(trajectory-[0-9a-f]+\.jsonl|instruction-[0-9a-f]+
 #: names are for reading a trajectory afterwards.
 NAMED_PATHS = 5
 
+#: "No verdict recorded yet", which is not the same as "the check said nothing".
+#: Without it the first step of every checked run counted as progress, because
+#: the verdict went from unknown to known — and that is the scaffold's doing
+#: rather than the agent's, the same reason `IGNORED_FILES` excludes the
+#: instruction file. A run whose first step did nothing should say so.
+UNSEEN = object()
+
 
 def _ignored(relative: Path) -> bool:
     parts = relative.parts
@@ -109,11 +116,11 @@ def scan(root: Path) -> dict[str, tuple[int, int]]:
 class Progress:
     """Per-step progress for one agent, and the stall streak it accumulates."""
 
-    def __init__(self, root: str | Path, *, target: str = "", check: str | None = None):
+    def __init__(self, root: str | Path, *, target: str = "", check: Any = UNSEEN):
         self.root = Path(root)
         self._files = scan(self.root)
         self._target = target
-        self._check = check
+        self._check: Any = check
         #: Consecutive stalled steps ending at the last one recorded.
         self.streak = 0
         #: The longest streak this agent has run, for the handoff and the record.
@@ -132,7 +139,7 @@ class Progress:
             if files[path] != self._files[path]
         )
         target_moved = target != self._target
-        check_moved = check != self._check
+        check_moved = self._check is not UNSEEN and check != self._check
         self._files, self._target, self._check = files, target, check
 
         moved = bool(created or removed or modified or target_moved or check_moved)

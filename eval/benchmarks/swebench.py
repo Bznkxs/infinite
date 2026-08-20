@@ -26,6 +26,10 @@ from ..fetch import rows
 from ..workspace import Instance
 
 NAME = "swebench"
+#: The dataset ships the official fix, so a failure here can be attributed to
+#: the agent rather than to an environment that cannot be built. No other
+#: benchmark has one — see `run_one`.
+HAS_GOLD_PATCH = True
 DATASET = "princeton-nlp/SWE-bench_Verified"
 #: Repositories that install from source with no compiler and no system
 #: libraries. Everything else needs the Docker harness this one replaces.

@@ -46,27 +46,34 @@ src/infinite/
   registers.py   the register file and the dump
   regfile.py     0.0.8a: the registers as $R0.. and $REGDIR/0.. around bash
   prompt.py      the system message, and `build_brief`
+  progress.py    0.0.8d §4.1: what a step left behind, and the stall streak
   tools.py       bash, load, set, set_target, spawn, resume
   workspace.py   the shared directory, and facts.md
 eval/
-  run.py         benchmark harness  (--profile frame)
+  run.py         benchmark harness  (--profile frame, --arm)
   analyse.py     reads §8's measures off a run's trajectories
+  benchmarks/width.py   the step_loop probe, as a command rather than a recipe
 test/
   infinite_0_0_1_simple/   the 0.0.7 suite, updated
-  infinite_0_0_8_frames/   the 0.0.8 suite (90 tests)
+  infinite_0_0_8_frames/   the 0.0.8 suite
 eval/results/
   steploop-0.0.8.json      the five probe arms, distilled (runs/ is gitignored)
 ```
 
 ```bash
-uv run pytest test                      # 262 tests, offline, ~18s — 261 pass, see §4.6
+uv run pytest test                      # 301 tests, offline, ~18s, all pass
 python -m eval.analyse runs/<workspace> # what a run actually did
 python -m eval.run babilong --config 1M --split qa2 -n 1 --profile frame
+python -m eval.run width -n 3 --profile frame            # the hard task, x3
+python -m eval.run width -n 3 --profile frame --arm no-stall-charge
 ```
 
 Everything 0.0.8 adds has a flag to turn it off, so any of it can be A/B'd:
 `--no-shell-registers`, `--no-charge`, `--no-checks`, `--no-live-check`,
-`--max-depth N`. There is no `--no-lookup` any more; see §4.0.
+`--max-depth N`, and 0.0.8d's `--no-stall-charge` / `--no-stall-notice`. There is
+no `--no-lookup` any more; see §4.0. `eval/run.py`'s `ARMS` names one flag each,
+because §6's first rule is one variable per arm and naming them is cheaper than
+remembering.
 
 ## 2. What 0.0.8 achieved
 
@@ -131,6 +138,9 @@ two rulers — compare the character counts.
 | the width probe | 5 live runs of `step_loop.py`, 80 steps each | 3 wrote a module, 2 passed |
 | 7.6's canvas bisection | one run at canvas 12,288 | negative |
 | stall streaks (0.0.8d, §4.1) | proxy over the 7 frames of the 5 arms | separates pass from fail |
+| progress, the notice, the price | `test_progress.py` (23 tests) | pass |
+| the probe as a harness | `test_width_probe.py`, synthetic corpus | pass |
+| §4.6's firewall hole | the suite, which is green | fixed |
 | transit, brief cost | read off trajectories | answered |
 
 Read that table with §4.0 in mind: the five probe arms ran with `lookup`
@@ -267,13 +277,47 @@ Charging prices delegation. Nothing prices a livelock. A step that runs one
 `grep` and a step that writes a module cost the same, and the budget line says
 nothing about what the steps left behind.
 
-**0.0.8d's mechanism, in three tiers, cheapest first.** (1) The scaffold
-measures progress: every step records what durable state it changed, and
-`analyse.py` reports the stall streaks per agent. (2) The dump says so once a
-streak passes a threshold — one line, beside the budget line, which is the one
-piece of state five runs show the agent actually responds to. (3) *Not yet*: a
-stall streak charged against the budget, the way `charge_children` prices
-delegation. Held until (1) says what the streaks are, by §6's one-variable rule.
+**0.0.8d's mechanism, in three tiers — all three built.**
+
+1. **Measured.** `progress.py`. Every step records what durable state it
+   changed, into the trajectory; the streak goes in the handoff, so a parent
+   deciding whether to resume a child knows whether that child was moving.
+   `analyse.py` grew `stall / worst / lock` columns. The measure costs nothing:
+   one `stat` per file in the workspace, no reads, so it is the same price on a
+   ten-megabyte corpus as on a stub.
+2. **Shown.** A `[Stall]` line in the dump once the streak reaches
+   `stall_notice` (3). It is state beside the budget line, not a sentence in the
+   system message — which is the whole design argument: the budget line is the
+   one piece of state five runs show the agent acting on, and the fixed half of
+   every request did not grow by a character. A working run never sees it.
+3. **Charged.** `stall_surcharge` (1). From the threshold on, a stalled step
+   costs itself and one more, so a livelocked frame spends its allowance at
+   twice the rate and dies at about half the steps. `charge_children` is the
+   precedent and the argument — it is the one mechanism in the series the runs
+   show an agent responding to, and the cascade of 4.4 terminated on budget
+   because of it. A livelock is that failure inside one frame instead of four.
+
+Three properties of the price are worth stating, because each was a decision:
+
+- **It is a price, not a cap.** 0.0.8c §6 gave up the depth ceiling on the
+  principle that the scaffold has an opinion about the resource and not about
+  the shape of the work. A livelock ceiling would be the same mistake in a new
+  place.
+- **The threshold is what keeps it from taxing a strategy that works.** Reading
+  four files in one step to decide is a stall and the system message asks for
+  it; three in a row is free. On the five arms this prices health at about one
+  step in fifty and a livelock at one in four.
+- **A parent is not billed for its child's surcharge.** It is a rate inside the
+  frame's own allowance, so a child cannot cost more than the allocation its
+  parent made — 0.0.8c §5's invariant. What the parent gets instead is the
+  streak, in the handoff, which it can act on because it is the only frame that
+  can change the brief.
+
+**None of tier 3 has been run live.** The threshold and the surcharge are fitted
+to seven frames from five runs, one per arm, on a proxy measure. That is enough
+to choose a default and not enough to believe it, so both have flags —
+`--no-stall-charge` keeps the measure and the notice and drops the price;
+`--no-stall-notice` drops both — and the two arms are in `eval/run.py`'s `ARMS`.
 
 ### 4.2 The canvas is not the binding constraint
 
@@ -397,36 +441,74 @@ the model, which is what the test actually asks. And its second half — stacked
 file reads, several files open with the status of each kept — is a real gap:
 `load(path, start)` is stateless and there is no open-file table anywhere.
 
+## 4.8 Where the first Design Test actually stands
+
+[Design Tests (Top Down)](Design%20Tests%20(Top%20Down).md) opens with the
+Infinite Context Test, in four clauses. Nothing in this project has ever scored
+them one at a time, so here they are, and this is the list 0.0.8d is trying to
+close.
+
+| clause | scaffold | model | verdict |
+| --- | --- | --- | --- |
+| **fixed context** — does not *grow* with the task | `test_fixed_context.py`, four axes; live, five agents at five depths spanned 1,389 tokens | — | **held** |
+| **infinite reading** | `test_the_request_does_not_grow_with_the_size_of_what_is_read`, 4KB to 4MB | 6/6 under `--frame`; a 10M-token BABILong instance in nine steps | **held** |
+| **infinite writing** | `test_the_request_does_not_grow_with_the_size_of_what_is_written`, 10,000 lines | *nothing* — no live run has ever been graded on how much it produced | **half** |
+| **infinite complexity** | more steps do not grow the request | 2 of 5 arms, n=1 per arm, on the one task | **open** |
+
+Two things follow, and they are the whole of what is left.
+
+**The scaffold half is done and it is the easy half.** Every one of those
+scaffold-side tests drives a `FakeModel`. They prove the *scaffold* does not
+grow, which is a real property and is not the claim. "Complete tasks however
+complicated they are" is a claim about a model working inside the thing, and only
+a live run can speak to it.
+
+**Infinite writing has no live evidence at all, and nobody noticed.** §4.7 lists
+the two Design Tests with no evidence and this is not on the list, because the
+offline test exists and reads like a result. It is not one: it asserts that
+writing 10,000 lines through `bash` does not move the request, which was never in
+doubt. What has never been run is a task whose *output* is the hard part — a
+model asked to produce far more than a context could hold, graded on whether it
+produced it. That is a cheaper probe than the width one and it is missing.
+
+So the first Design Test needs live runs, and this iteration was spent making
+them cost one command instead of an afternoon (§1, `eval.run width`). What it
+could not do is run them: **this machine has no API credentials**, so every
+number in §4.1 comes from the trajectories of the five arms already on disk, and
+tier 3 of the mechanism is fitted to those and unvalidated. The next person with
+a key runs item 1 below and knows more than this document does.
+
 ## 5. What to do next
 
 Ordered by what each buys, cheapest first.
 
-0. **Fix 4.6; it is one line.** Add the running interpreter's `sys.base_prefix`
-   to the firewall's readable roots. It turns the suite green and stops `python3`
-   being a coin flip inside the sandbox. (4.0 and 4.5 are already done.)
-1. **Re-run the probe on the 4.0 geometry before anything else is read out of
-   it.** Removing `lookup` moved the fixed half of every request, so none of the
-   five arms is a like-for-like comparison any more. Two runs of plain `--frame`
-   re-establish the baseline, and they also answer 4.5's question for free: with
-   `facts.md` present from step one and no tool filling it, either the agent
-   appends to it or it does not.
-2. **Replicate the headline while you are there.** Everything in §2 about the
-   probe is n=1 per arm on a task with enormous variance. Three runs of plain
-   `--frame` on the 4.0 geometry would turn "2 of 5 passed" into a number worth
-   quoting, and they are the same runs item 1 asks for.
-3. **Settle 4.3.** Three runs of the probe with a *gradient* check against three
-   with a binary one — e.g. a check that counts remaining stub bodies and prints
-   the count, versus one that only passes at zero. Costs six 80-step runs and
-   could change what `check` is for. Use `--check` on the root; the harness is
-   `runs/steploop_0.0.8*` and the workspace recipe is in §6.
-4. **Make progress observable (4.1).** 0.0.8d's subject, and now the first
-   item rather than the fourth — everything above it is a measurement that
-   cannot be read without it. Steps treat a `grep` and a module as equal;
-   charging made delegation visible by making it *cost* something the agent
-   watches. The analogue is not a price on reading, which would tax a strategy
-   that works, but a price on *not moving*: a stall costs nothing, a streak of
-   them costs budget. Measure first (the trajectories on disk are enough), show
-   second, charge third.
+Items 0 and 4 are done — 4.6's one line, and 4.1's three tiers. Everything left
+needs an API key, which is why it is a list rather than a result.
+
+1. **Three runs of `--arm baseline`, and three of `--arm no-stall-charge`.**
+   This is now one command each (`eval.run width -n 3 --profile frame`) and it
+   answers four questions at once: whether "2 of 5 passed" replicates at all;
+   whether the 4.0 geometry changed it, since removing `lookup` moved the fixed
+   half of every request and no arm is a like-for-like comparison any more;
+   whether pricing a livelock does anything; and 4.5's question for free, since
+   `facts.md` is now present from step one with nothing but the agent to fill
+   it. Read them with `eval.analyse`, which reports the streaks.
+2. **Grade the runs on the streaks, not only on pass/fail.** Six 80-step runs
+   give twelve-odd frames, which is enough to say whether the separation in
+   §4.1 survives contact with the real measure rather than the proxy. If it
+   does, `stall_notice` has a number behind it; if it does not, tier 3 comes
+   out and tier 1 stays.
+3. **Settle 4.3.** Three runs with a *gradient* check against three with a
+   binary one — a check that counts remaining stub bodies and prints the count,
+   versus one that only passes at zero. It is the only item that could change a
+   mechanism rather than a constant, and it is now cheaper than it was: the
+   verdict changing is itself progress (`progress.py` counts it), so a gradient
+   check and the stall measure test the same hypothesis from two directions.
+4. **Probe infinite writing (4.8).** The clause with no live evidence, and the
+   cheapest thing on this list. A task whose output is the hard part — produce a
+   document, a dataset, a module far larger than any context — graded on whether
+   it arrived and whether the request moved. Half a day, and it closes a quarter
+   of the first Design Test.
 5. **Decide depth (4.4).** The choice is between a frame surcharge, a reserve a
    parent must keep, and leaving it unlegislated with the sentence doing the
    work. Whichever, it should be settled by running the probe at
@@ -442,24 +524,48 @@ Ordered by what each buys, cheapest first.
 
 ## 6. Pitfalls that cost time
 
+- **The summary tests share one fake model across two threads.** Since 0.0.7f
+  the summary of step N is written while step N+1 is generated, so `SummaryModel`
+  is called from both and every list on it — `script`, `summaries`, `prompts` —
+  is shared. The race was latent until 0.0.8d put a workspace scan in front of
+  the summary submit and shifted the timing; the suite then failed about one run
+  in five, in whichever summary test lost. It is a lock now. If a summary test
+  fails once and passes on re-run, suspect this shape rather than the scaffold.
 - **Never launch a run with `nohup … &`.** It gets orphaned and reaped mid-run;
   an 80-step run died at step 23 that way. Use the harness's own background
   mechanism and let the process be the foreground of that call.
 - **Change one variable per arm.** Two arms of the 0.0.8 A/B got a stricter
   `check` than the other two, which cost the whole comparison; a fifth run was
-  needed to repair it.
+  needed to repair it. `eval/run.py`'s `ARMS` now names one flag each and a test
+  asserts that each is one flag, so an arm is a word you type rather than a set
+  of flags you remember.
 - **`python` is not on PATH here; `python3` is.** A parent that writes
   `python -c …` as a child's `check` burns the child's entire budget on exit 127.
   The scaffold now says so, but the brief still has to be right. And *which*
   `python3` matters under the firewall: `/usr/bin/python3` works, the venv's does
   not, because its real prefix is outside `SYSTEM_READ_DARWIN`. See 4.6.
 - **The token figures in the 0.0.8 note were `max_request_chars / 2.6`, not
-  measurements.** They have been replaced with the `usage` records, which is what
-  `python -m eval.analyse` should learn to report; it currently reports request
-  *chars* only. Anything you quote as "tokens" should come from `usage`.
+  measurements.** They have been replaced with the `usage` records, and
+  `eval.analyse` now reports those: its `max in` column sums the `usage` input
+  fields and reproduces the re-derived 8,233 and 8,592 exactly. Anything you
+  quote as "tokens" comes from there; `max_request_chars` is still in the JSON
+  and is still chars.
 - **Rebuild the probe workspace from `runs/reconstruct_infinite_0.0.7i`** — the
   nine sibling modules plus the 99-line stub — and strip `__pycache__`. A
-  workspace reused across arms carries the previous arm's scratch files.
+  workspace reused across arms carries the previous arm's scratch files. This is
+  `eval/benchmarks/width.py` now: it copies the corpus, strips the caches, puts
+  the arm in the instance id so two arms cannot land in one directory, and
+  `--dry-run` builds the workspace so the recipe can be checked without spending
+  a run. Since `runs/` is gitignored the corpus is still only on the machine that
+  produced it — `INFINITE_WIDTH_SOURCE` points elsewhere, and an absent corpus
+  fails loudly with the recipe rather than grading zero.
+- **The probe's own grader does not believe the response.** Two arms reported a
+  module they had not written, one of them returning `ok=True` while its own
+  response said the stub was untouched. `width.grade` runs the import and counts
+  the remaining `NotImplementedError`, keeps what the agent claimed, and reports
+  `untouched` separately — three of five arms ended there, and a run that wrote
+  457 lines that do not import is a different failure from one that wrote
+  nothing.
 - **`runs/steploop_control` is the 0.0.7 comparison and it is not `--short`.** Its
   largest request was 23,251 tokens. Anything that compares against "0.0.7"
   should say which geometry it means.

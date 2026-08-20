@@ -189,6 +189,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not run a child's `check` at the pop; it becomes advice (0.0.8c §3).",
     )
     parser.add_argument(
+        "--no-stall-charge",
+        action="store_true",
+        help=(
+            "Do not charge budget for steps that leave nothing behind (0.0.8d §4.1). "
+            "The streak is still measured and still shown; only the price goes."
+        ),
+    )
+    parser.add_argument(
+        "--no-stall-notice",
+        action="store_true",
+        help=(
+            "Do not tell the agent it has stopped making progress. Turns off the "
+            "price too, which is thresholded on the same number."
+        ),
+    )
+    parser.add_argument(
         "--no-live-check",
         action="store_true",
         help=(
@@ -277,6 +293,10 @@ def collect_overrides(args) -> dict:
         overrides["charge_children"] = False
     if args.no_checks:
         overrides["run_checks"] = False
+    if args.no_stall_charge:
+        overrides["stall_surcharge"] = 0
+    if args.no_stall_notice:
+        overrides["stall_notice"] = None
     if args.no_live_check:
         overrides["check_every_step"] = False
     if args.allow_read:

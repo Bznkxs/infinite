@@ -96,6 +96,7 @@ class RegisterFile:
         max_steps: int | None = None,
         run: tuple[int, int] | None = None,
         charged: int = 0,
+        stalled: int = 0,
         depth: int | None = None,
         check: str | None = None,
         stall: str | None = None,
@@ -115,6 +116,9 @@ class RegisterFile:
         merely visible: the steps this agent's children have taken come out of
         its own remaining budget, so `max_steps` on a `spawn` stops being a wish
         and becomes an allocation.
+
+        `stalled` is 0.0.8d §4.1's third tier, and it is `charged` for a frame
+        rather than a subtree: budget spent on steps that left nothing behind.
 
         `depth` is 0.0.8c §6. The scaffold no longer has an opinion about how
         deep a tree should go, and an agent that is to have one needs to be able
@@ -138,9 +142,17 @@ class RegisterFile:
             if step is not None:
                 spent += (", " if spent else "") + f"step {step}"
             if step is not None and max_steps:
-                left = max_steps - step + 1 - charged
+                left = max_steps - step + 1 - charged - stalled
                 spent += f" of {max_steps} ({left} left, including this one"
-                spent += f"; {charged} of your budget went to children)" if charged else ")"
+                went = []
+                if charged:
+                    went.append(f"{charged} of your budget went to children")
+                # 0.0.8d §4.1: the same sentence for the same reason. A frame that
+                # is losing budget to steps that left nothing behind should be
+                # able to see that that is where it went.
+                if stalled:
+                    went.append(f"{stalled} to steps that changed nothing")
+                spent += ("; " + ", ".join(went) + ")") if went else ")"
                 # Four children have now finished their work and died without
                 # writing the one file that ends a run, each of them on a step
                 # that began "with only two steps remaining". The count was

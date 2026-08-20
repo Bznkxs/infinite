@@ -453,7 +453,9 @@ def test_the_step_line_counts_the_run_once_there_is_more_than_one_agent(tmp_path
     Five reconstruct runs opened by delegating a digest, and from where the
     parent sat that cost one step. It cost 124.
     """
-    agent, model = make_agent(tmp_path, [], summary=False)
+    # `stall_surcharge=0`: the point here is the parent's counter, and a child
+    # that echoes rather than writing is 0.0.8d's livelock by accident.
+    agent, model = make_agent(tmp_path, [], summary=False, stall_surcharge=0)
     idle = step(tool_use("bash", command="echo working", register_id=FIRST_FREE))
     model.script = [
         step(spawn(6, max_steps=4)),

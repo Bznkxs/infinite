@@ -102,6 +102,20 @@ def test_the_check_verdict_changing_moved(tmp_path):
     assert progress.record(target="", check="FAILS: 4 stubs left")["moved"]
 
 
+def test_learning_the_verdict_for_the_first_time_is_not_the_agents_progress(tmp_path):
+    """The scaffold runs the check, so the first verdict is not the agent's doing.
+
+    Counting it would have made the opening step of every checked run look like
+    progress — and it is the opening steps of a livelock that matter most.
+    """
+    root = tmp_path / "w"
+    root.mkdir()
+    progress = Progress(root)
+
+    assert not progress.record(target="", check="FAILS (exit 1): ImportError")["moved"]
+    assert progress.record(target="", check="PASSES")["moved"]
+
+
 # --- what the scaffold writes every step regardless ------------------------
 
 
@@ -196,7 +210,7 @@ def test_a_working_run_pays_nothing_for_the_measure():
 
 
 def test_every_step_records_what_it_left_behind(tmp_path):
-    built = build_agent(tmp_path, max_steps=4)
+    built = build_agent(tmp_path, max_steps=4, stall_surcharge=0)
     response = built.response_path.name
     built.model.script = [
         reading(),
@@ -217,7 +231,7 @@ def test_every_step_records_what_it_left_behind(tmp_path):
 
 
 def test_an_agent_that_stalls_is_told_so_and_only_then(tmp_path):
-    built = build_agent(tmp_path, max_steps=6, stall_notice=3)
+    built = build_agent(tmp_path, max_steps=6, stall_notice=3, stall_surcharge=0)
     response = built.response_path.name
     built.model.script = [reading()] * 4 + [
         step(tool_use("bash", command=f"printf '{{}}' > {response}"))
@@ -236,7 +250,7 @@ def test_an_agent_that_stalls_is_told_so_and_only_then(tmp_path):
 
 
 def test_the_notice_can_be_turned_off(tmp_path):
-    built = build_agent(tmp_path, max_steps=5, stall_notice=None)
+    built = build_agent(tmp_path, max_steps=5, stall_notice=None, stall_surcharge=0)
     built.model.script = [reading()] * 5
     built.run()
 
@@ -251,7 +265,7 @@ def test_an_unfinished_agent_hands_its_parent_the_streak(tmp_path):
     """A child that ran out of steps having stalled nine in a row is not a child
     to hand more steps to unchanged, and its parent is the only one who can
     change the brief."""
-    built = build_agent(tmp_path, max_steps=3)
+    built = build_agent(tmp_path, max_steps=3, stall_surcharge=0)
     built.model.script = [reading()] * 3
     result = built.run()
 
@@ -260,3 +274,107 @@ def test_an_unfinished_agent_hands_its_parent_the_streak(tmp_path):
     assert handoff["progress"] == {
         "steps": 3, "stalls": 3, "longest_stall_streak": 3,
     }
+
+
+# --- the price, which is what bounds a livelock ---------------------------
+# `charge_children` is the precedent: 0.0.8c made a child's steps cost the
+# parent that commissioned them, and the pass-through cascade then terminated
+# on budget rather than on a ceiling. A livelock is the same failure inside one
+# frame, so it is priced the same way. 0.0.8c §6's rule is why it is a price and
+# not a cap: the scaffold has an opinion about the resource, not about the shape
+# of the work.
+
+
+def test_a_run_of_stalls_short_of_the_threshold_costs_nothing_extra(tmp_path):
+    """Reading four files to decide is a stall and the prompt asks for it."""
+    built = build_agent(tmp_path, max_steps=8, stall_notice=3, stall_surcharge=1)
+    response = built.response_path.name
+    built.model.script = [reading(), reading()] + [
+        step(tool_use("bash", command=f"printf '{{}}' > {response}"))
+    ]
+    result = built.run()
+
+    assert result.ok and built.stalled == 0
+
+
+def test_every_stall_past_the_threshold_costs_a_step(tmp_path):
+    built = build_agent(tmp_path, max_steps=20, stall_notice=3, stall_surcharge=1)
+    built.model.script = [reading()] * 20
+    built.run()
+
+    # Steps 1 and 2 are free; from the third onward each stall costs itself and
+    # one more, so the twenty-step allowance runs out after eleven steps.
+    assert built.step == 11 and built.stalled == 9
+
+
+def test_a_livelock_costs_twice_what_working_costs(tmp_path):
+    """The point of the price, in one comparison: the same allowance buys about
+    half as many steps once a frame stops leaving anything behind."""
+    working = build_agent(tmp_path / "a", max_steps=20, stall_surcharge=1)
+    working.model.script = [
+        step(tool_use("bash", command=f"echo {i} >> notes.md")) for i in range(20)
+    ]
+    working.run()
+
+    looping = build_agent(tmp_path / "b", max_steps=20, stall_surcharge=1)
+    looping.model.script = [reading()] * 20
+    looping.run()
+
+    assert working.step == 20 and working.stalled == 0
+    assert looping.step == 11
+    assert looping.step < working.step / 1.7
+
+
+def test_the_dump_says_where_the_budget_went(tmp_path):
+    built = build_agent(tmp_path, max_steps=20, stall_notice=3, stall_surcharge=1)
+    built.model.script = [reading()] * 6
+    built.run()
+
+    dumps = [
+        json.loads(line)["model_input"]["messages"][0]["content"]
+        for line in built.trajectory.path.read_text().splitlines()
+        if json.loads(line)["role"] == "assistant"
+    ]
+    # Two units gone by the opening of step 5: the third and fourth stalls.
+    assert "2 to steps that changed nothing" in dumps[4]
+    assert "14 left" in dumps[4]
+
+
+def test_the_price_can_be_turned_off_for_an_arm_that_measures_it(tmp_path):
+    built = build_agent(tmp_path, max_steps=6, stall_surcharge=0)
+    built.model.script = [reading()] * 6
+    built.run()
+
+    assert built.step == 6 and built.stalled == 0
+
+
+def test_a_parent_is_not_billed_for_its_childs_surcharge(tmp_path):
+    """0.0.8c §5's invariant: a child cannot cost more than it was allocated.
+
+    The surcharge is a rate inside the child's own allowance, so a child that
+    livelocks runs out sooner and the parent is billed for the steps that
+    actually happened. What the parent gets instead is the streak, in the
+    handoff — which it can act on, because it is the only frame that can change
+    the brief.
+    """
+    parent = build_agent(tmp_path, max_steps=12, stall_surcharge=1)
+    # The child shares this FakeModel and consumes the entries after the spawn,
+    # so the parent's own answer has to come last.
+    parent.model.script = [
+        step(tool_use(
+            "spawn", goal="a piece of it", check="true",
+            return_schema={"type": "object"}, register_id=6, max_steps=6,
+        )),
+    ] + [step(text("the child works and does not answer"))] * 6 + [
+        step(tool_use("bash", command="printf '{}' > " + parent.response_path.name)),
+    ]
+    result = parent.run()
+
+    assert result.ok
+    # Six allocated; the child stalled through all of it, so its own surcharge
+    # ended it at four real steps and four is what the parent paid.
+    assert parent.charged == 4
+    handoff = json.loads(
+        next(parent.workspace.root.glob("handoff-*.json")).read_text()
+    )
+    assert handoff["progress"]["longest_stall_streak"] == 4

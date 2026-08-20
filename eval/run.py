@@ -34,8 +34,29 @@ PROFILES = {
     "frame": ["--frame"],
 }
 
+#: One named arm is one variable off the baseline, which is §6's rule made
+#: typeable: two arms of the 0.0.8 A/B differed in two things and cost the whole
+#: comparison. The arm is part of the instance id as well as the command, so two
+#: arms cannot land in one workspace and inherit each other's scratch — the
+#: other pitfall from the same list.
+ARMS: dict[str, list[str]] = {
+    "baseline": [],
+    # 0.0.8d §4.1 tier three: is pricing a livelock what makes the difference,
+    # or is being told about it enough?
+    "no-stall-charge": ["--no-stall-charge"],
+    "no-stall-notice": ["--no-stall-notice"],
+    # §4.3, the strongest untested signal in the 0.0.8 data: a check that cannot
+    # get closer may be worse than none.
+    "no-live-check": ["--no-live-check"],
+    # §4.4: unbounded depth produced the pass-through cascade.
+    "depth-1": ["--max-depth", "1"],
+    "no-charge": ["--no-charge"],
+}
 
-def run_one(instance: Instance, *, profile: str, fresh: bool) -> dict[str, Any]:
+
+def run_one(
+    instance: Instance, *, profile: str, fresh: bool, arm: str = "baseline"
+) -> dict[str, Any]:
     module = REGISTRY[instance.benchmark]
     workspace = instance.write(RUNS, fresh=fresh)
     if hasattr(module, "materialise"):
@@ -48,6 +69,7 @@ def run_one(instance: Instance, *, profile: str, fresh: bool) -> dict[str, Any]:
         "-s", str(workspace / "schema.json"),
         "--max-steps", str(instance.max_steps),
         *PROFILES[profile],
+        *ARMS[arm],
     ]
     log = workspace.parent / f"{instance.instance_id}.{profile}.log"
     clock = time.monotonic()
@@ -72,7 +94,11 @@ def run_one(instance: Instance, *, profile: str, fresh: bool) -> dict[str, Any]:
     # official fix is applied and graded, and only an instance whose gold patch
     # passes counts against the agent.
     verified = True
-    if not grade.get("correct") and hasattr(module, "materialise"):
+    # SWE-bench only: it is the one benchmark whose environment can fail in a way
+    # that looks like the agent failing, and the one that ships an official fix
+    # to prove otherwise. `materialise` was the wrong test for that — `width`
+    # has one too, and has no gold patch.
+    if not grade.get("correct") and getattr(module, "HAS_GOLD_PATCH", False):
         from .goldcheck import check
 
         verified = bool(check(instance.instance_id).get("gold_passes"))
@@ -82,6 +108,7 @@ def run_one(instance: Instance, *, profile: str, fresh: bool) -> dict[str, Any]:
         "benchmark": instance.benchmark,
         "instance_id": instance.instance_id,
         "profile": profile,
+        "arm": arm,
         "exit_code": completed.returncode,
         "seconds": round(elapsed, 1),
         "agent_id": agent_id,
@@ -163,6 +190,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("-n", "--count", type=int, default=1)
     parser.add_argument("--profile", default="short", choices=sorted(PROFILES))
+    parser.add_argument(
+        "--arm",
+        default="baseline",
+        choices=sorted(ARMS),
+        help="One variable off the baseline (§6: change one variable per arm).",
+    )
     parser.add_argument("--max-steps", type=int, default=None, help="override the benchmark's own budget")
     parser.add_argument("--fresh", action="store_true", help="delete an existing workspace first")
     parser.add_argument("--report", action="store_true")
@@ -187,12 +220,28 @@ def main(argv: list[str] | None = None) -> int:
     for instance in instances:
         if args.max_steps:
             instance.max_steps = args.max_steps
+        # In the id, so two arms cannot share a workspace and inherit each
+        # other's scratch files — §6's other pitfall.
+        if args.arm != "baseline":
+            instance.instance_id = f"{instance.instance_id}.{args.arm}"
         if args.dry_run:
             path = instance.write(RUNS, fresh=args.fresh)
-            print(f"prepared {path} ({sum(len(v) for v in instance.files.values()):,} chars, "
+            # Materialise too. Every pitfall in the 0.0.8d handoff's §6 is a
+            # workspace that was built wrong — a stale `__pycache__`, an arm
+            # inheriting the last arm's scratch — and a dry run that skipped the
+            # step where those happen could not catch any of them.
+            if hasattr(module, "materialise"):
+                module.materialise(instance, path)
+            chars = sum(
+                p.stat().st_size for p in path.rglob("*") if p.is_file()
+            )
+            files = sum(1 for p in path.rglob("*") if p.is_file())
+            print(f"prepared {path} ({files} files, {chars:,} bytes, "
                   f"{instance.max_steps} steps)")
             continue
-        record = run_one(instance, profile=args.profile, fresh=args.fresh)
+        record = run_one(
+            instance, profile=args.profile, fresh=args.fresh, arm=args.arm
+        )
         mark = "PASS" if record.get("correct") else "fail"
         print(f"{mark} {record['instance_id']} — {record.get('answer')!r} vs {record.get('target')!r} "
               f"({record['steps']} steps, {record['seconds']:.0f}s)")

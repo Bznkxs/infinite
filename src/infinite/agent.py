@@ -286,6 +286,11 @@ class Agent:
         #: of steps that left nothing is. Built here rather than in `run` so the
         #: first step is measured against the workspace as it was handed over.
         self.progress = Progress(workspace.root)
+        #: Budget charged for stalling, on the same footing as `charged`: steps
+        #: this agent spent without leaving anything behind, priced so that a
+        #: livelock is bounded by the resource rather than by a ceiling. 0.0.8c
+        #: §6's rule applied to a frame instead of a subtree.
+        self.stalled = 0
         #: Steps already on record; a fresh run starts at 0.
         self.step = resume_from
         #: Where this segment began, so a budget and an allowance can be worked
@@ -642,6 +647,7 @@ class Agent:
                             charged=self.charged,
                             depth=self.depth,
                             check=self._check_line,
+                            stalled=self.stalled,
                             stall=stall_line(
                                 self.progress.streak, self.config.stall_notice
                             ),
@@ -794,7 +800,10 @@ class Agent:
         """
         if self.config.max_steps is None:
             return True
-        return self.step - segment_start + self.charged < self.config.max_steps
+        return (
+            self.step - segment_start + self.charged + self.stalled
+            < self.config.max_steps
+        )
 
     def allowance(self) -> int | None:
         """Steps left for this agent's children, or None when it has no cap.
@@ -805,8 +814,24 @@ class Agent:
         if self.config.max_steps is None:
             return None
         return (
-            self.config.max_steps - (self.step - self._segment_start) - self.charged
+            self.config.max_steps
+            - (self.step - self._segment_start)
+            - self.charged
+            - self.stalled
         )
+
+    def _stall_surcharge(self, streak: int) -> int:
+        """What this step costs on top of itself for having left nothing behind.
+
+        Nothing until the streak is long enough to be a livelock rather than a
+        step spent reading, and then a flat surcharge for every further one — so
+        a run that loops spends its budget at twice the rate and a run that is
+        working never notices the mechanism exists.
+        """
+        threshold = self.config.stall_notice
+        if threshold is None or streak < threshold:
+            return 0
+        return self.config.stall_surcharge
 
     def charge(self, steps: int) -> None:
         """Debit this agent for what a descendant spent."""
@@ -1046,6 +1071,7 @@ class Agent:
                 "segment_steps": segment_steps,
                 "charged": self.charged,
                 "cost": segment_steps + self.charged,
+                "stalled": self.stalled,
                 "progress": self.progress.summary(),
                 "registers": self.registers.snapshot(),
             }
@@ -1065,6 +1091,12 @@ class Agent:
                 else None
             ),
             segment_steps=segment_steps,
+            # Not `+ self.stalled`. The surcharge is a rate inside this frame's
+            # own allowance — it makes a livelocked frame run out sooner — and
+            # billing a parent for it as well would let a child cost more than
+            # the allocation the parent made, which is the one thing 0.0.8c §5
+            # exists to prevent. The parent learns about the livelock from the
+            # handoff instead, where it can act on it by changing the brief.
             cost=segment_steps + self.charged,
         )
 
@@ -1270,10 +1302,14 @@ class Agent:
         the tools have run, after the check, and after the response was read, so
         that everything the step could have left behind has landed.
         """
-        record["progress"] = self.progress.record(
+        progress = record["progress"] = self.progress.record(
             target=self.registers.values[TARGET_REGISTER],
             check=self._check_line,
         )
+        surcharge = self._stall_surcharge(progress["stall_streak"])
+        if surcharge:
+            self.stalled += surcharge
+            progress["surcharge"] = surcharge
         if not self.summarizes or last:
             # A run that is over does not need a summary handed to a step that
             # will never happen.
