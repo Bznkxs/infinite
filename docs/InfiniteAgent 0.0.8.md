@@ -20,6 +20,7 @@ arguments; this is what happened when they were run.*
 | 8b §4 | `facts.md`, the run's memo table, and 7.1's `lookup` beside it |
 | 8c §2 | `spawn(goal, read, write, check, …)` — the scaffold renders the brief |
 | 8c §3 | the scaffold runs `check` when a response lands; a return that fails it is refused |
+| 7.3 | and after every step, with the verdict one line above the register dump |
 | 8c §5 | a child's steps debit its parent's budget |
 | 8c §6 | no depth ceiling; the agent sees its depth; a parent may allow one |
 

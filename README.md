@@ -199,6 +199,14 @@ already was:
   the reason lands in register 0, and the child keeps working. A shell's 126 or
   127 — the command does not exist — reads differently from a check that ran and
   said no, because that check is the parent's and the child cannot change it.
+- **And it runs after every step, not only at the pop.** The verdict is one line
+  at the top of the dump, between the budget and the registers:
+  `[Check] FAILS (exit 1): ModuleNotFoundError… — tool_output/…`. That is 7.3's
+  "verify instead of read" made structural: a check is a machine operation, so
+  it is unbounded and costs no width, and being told every step whether the work
+  imports is cheaper than reading six modules to find out. A check slower than
+  `check_live_seconds` (15s) stops being run that way and says so —
+  `--no-live-check` turns it off.
 - **A child's steps come out of its parent's budget**, transitively, so
   `max_steps` is an allocation rather than a wish and the `[Step]` line says how
   much of the budget went to children. An allocation larger than what is left is
