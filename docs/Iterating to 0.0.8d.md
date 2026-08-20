@@ -30,12 +30,24 @@ verdict is:
 > something behind that outlives it — and nothing in 0.0.8 can tell a step that
 > did the work from a step that did not.
 
-That sentence is the brief for 0.0.8d, and it is the second version of it. The
-first said the task turned on *when a run starts writing*; §4.1 measures that
-and it is false — both frames that produced a working module wrote in the last
-fifth of their budget. Two other things have happened under this heading: the
-numbers in the 0.0.8 note were re-derived from the trajectories and several
-moved (§7), and `lookup` was removed outright (§4.0).
+That was the brief for 0.0.8d, and it is the second version of it: the first said
+the task turned on *when a run starts writing*, which §4.1 measures and refutes —
+both frames that produced a working module wrote in the last fifth of their
+budget, and so did all three that did it again in §4.9.
+
+**Where it ended up is further along than the brief.** The hard task now passes
+three times out of three (§4.9), the writing clause has its first live evidence
+at two scales (§4.8), and for the first time every clause of the Infinite Context
+Test has a number against it rather than an argument. What is *not* established is
+why: four things changed at once, and the mechanism this letter is named for
+collected two budget units across those three runs, so it is the least likely
+cause of its own success. §5 item 1 is the arm that separates them.
+
+Three other things happened under this heading: the numbers in the 0.0.8 note
+were re-derived from the trajectories and several moved (§7), `lookup` was removed
+outright (§4.0), and the eval harness turned out never to have passed a `check`
+(§6) — so every benchmark number in the repository predating this letter was
+measured without the heartbeat it was supposed to have.
 
 ## 1. The ground
 
@@ -60,6 +72,7 @@ test/
 eval/results/
   steploop-0.0.8.json      the five probe arms, distilled (runs/ is gitignored)
   volume-0.0.8d.json       the two infinite-writing rows, likewise
+  width-0.0.8d.json        the three width runs of 4.9, likewise
 ```
 
 ```bash
@@ -147,6 +160,7 @@ two rulers — compare the character counts.
 | the probe as a harness | `test_width_probe.py`, synthetic corpus | pass |
 | the writing probe | `test_volume_probe.py` (27 tests) | pass |
 | infinite writing, live | `volume` at 120 and 1,200 records, `--profile frame` | **2/2, request flat** |
+| infinite complexity, live | `width` x3 on the 0.0.8d geometry (4.9) | **3/3, request spans 232 tokens** |
 | the probe pipeline end to end | scripted model, live check, real grade, no API | pass |
 | every arm of every probe is a command the CLI accepts | `test_volume_probe.py` | pass |
 | §4.6's firewall hole | the suite, which is green | fixed |
@@ -368,10 +382,16 @@ margin. Whether that pressure is what got it out of the loop at step 18, or
 nearly killed a run that would have got out anyway, is one A/B —
 `--arm no-stall-charge` against the baseline — and it is the top of §5.
 
-Row 2 is the reassuring half of the same evidence: 1,200 records, longest streak
-3, **one** budget unit spent on stalling out of 300. A run that goes about its
-work never meets the mechanism. The whole cost fell on the run that spent twelve
-steps re-reading its own instruction file, which is the run it is for.
+The other four live runs moderate that, and they moderate it a long way. Across
+`volume` row 2 and the three `width` runs of 4.9, the price collected **one
+budget unit, zero, two and zero** — and the notice never fired at all in three of
+them. Over all five runs of this letter the surcharge charged 14 units, and 11 of
+those 14 fell on the single run that spent twelve steps re-reading its own
+instruction file. That is what a well-aimed price looks like: invisible to a run
+that is working, expensive for the one that is going in circles. So "the
+magnitude is aggressive" was a claim about one run, and the fuller picture is
+that the *threshold* is well placed and the magnitude has still only been tested
+once in anger.
 
 The default stays on, on the project's own convention that a new mechanism ships
 with a flag rather than a decision. Both flags exist (`--no-stall-charge` keeps
@@ -459,10 +479,31 @@ same artefact as scratch files, over and over.
 
 `Workspace` now creates the file with its header, and 4.0 removed the tool that
 was its only writer, so the table is the agent's to keep with `>>` and `grep`.
-What is left is the question the bug was hiding: does a memo table an agent can
+What was left was the question the bug was hiding: does a memo table an agent can
 actually see change what it does, or is `grep`-before-you-look a habit no
-sentence installs? That is a re-run, not a design question — and it is now
-`test_memo_table.py` rather than a claim.
+sentence installs?
+
+**The first re-run says yes, and says it about the specific fact that killed an
+earlier arm.** `width` on the 0.0.8d geometry (4.9) passed with three agents, and
+all three of them opened by `cat facts.md`. The table they built has five lines
+in it, and these are the first two:
+
+```
+step_loop.py: stub imports ToolRegistry (nonexistent) -> real class is ToolDispatcher in tools.py
+step_loop.py: stub imports name T from trajectory (nonexistent) -> use typing directly
+```
+
+Arm C died on exactly that. Its check said `ImportError: cannot import name
+'ToolRegistry' from 'infinite_agent.tools'` on step 1 and it spent the remaining
+eighty steps never resolving it, with `facts.md` not existing in its workspace at
+all while the system message told it the file was the run's memo table. Here the
+fact was resolved once, written down, and read by two frames that had not paid
+for it.
+
+One run, and the mechanism is a file and a sentence rather than a tool, so
+attribution is soft. But this is the first evidence the memo table does anything,
+and it is the best available candidate for what changed — see 4.9, which rules
+out the other new mechanism.
 
 ### 4.6 `python3` under the firewall — **fixed**
 
@@ -505,6 +546,52 @@ the model, which is what the test actually asks. And its second half — stacked
 file reads, several files open with the status of each kept — is a real gap:
 `load(path, start)` is stateless and there is no open-file table anywhere.
 
+### 4.9 The hard task, three times, on this geometry
+
+The width probe is the task 0.0.7 failed four times and 0.0.8 passed twice in
+five arms. `eval.run width --offset 0 -n 3 --profile frame` on the 0.0.8d
+geometry:
+
+| run | module | steps | agents | largest request | stalls | worst streak | livelocks | charged | stall paid | wall |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 550 lines | 71 | 3 | 7,867 | 4/71 | 1 | 0 | 19 | 0 | 1,549s |
+| 1 | 350 lines | 71 | 2 | 8,099 | 6/71 | 4 | 1 | 38 | 2 | 976s |
+| 2 | 377 lines | 63 | 2 | 7,958 | 3/63 | 1 | 0 | 40 | 0 | 691s |
+
+**Three of three.** Every module imports and none has a `NotImplementedError`
+left, graded by running the interpreter rather than by reading the response —
+which matters, because two 0.0.8 arms reported a module they had not written.
+
+**The largest request across all three spans 232 tokens**, 7,867 to 8,099. That
+is the fixed-context property on the hard task, live, at n=3: three runs that
+produced 350 to 550 lines apiece and none of them asked for more context than
+another.
+
+**The descent is 4.1's pattern in all three.** Every run has a frame that reads,
+writes a brief, and spawns — root wrote at 47 and spawned at 50 in run 0, wrote
+at 26 and spawned at 28 in run 1, wrote at 19 and spawned at 21 in run 2 — and in
+every case the *child* wrote the module. And it wrote it late in its own budget:
+step 36 of 38, step 39 of 40, step 7 of 8. Writing late is not the defect. Twice
+now.
+
+**The stall rates are 5.6%, 8.5% and 4.8%, against 28.6–53.8% in the five 0.0.8
+arms**, and the worst streaks are 1, 4 and 1 against 3 to 9. Something changed on
+this task, and the size of it is not subtle.
+
+**What it was is not established, and the mechanism this letter is about is the
+least likely candidate.** Four things differ from the old arms at once — no
+`lookup`, so the fixed half of every request is 636 characters smaller;
+`facts.md` present from step one; the progress measure with its notice and price;
+and a live `check` actually passed by the harness, which every eval run before
+this silently lacked (§6). That is four variables in one arm, which is the
+mistake §6 opens with. What can be ruled out is the price: it collected **two
+budget units across all three runs**, and the notice never fired at all in runs 0
+and 2. Whatever made these runs good, tiers 2 and 3 were not doing it. The memo
+table is the better candidate and 4.5 has the specific evidence.
+
+So: 3/3 is a result, not a cause. The A/B that separates the causes is §5 item 1,
+and it is now the only thing between this and a finding.
+
 ## 4.8 Where the first Design Test actually stands
 
 [Design Tests (Top Down)](Design%20Tests%20(Top%20Down).md) opens with the
@@ -517,15 +604,31 @@ close.
 | **fixed context** — does not *grow* with the task | `test_fixed_context.py`, four axes; live, five agents at five depths spanned 1,389 tokens | — | **held** |
 | **infinite reading** | `test_the_request_does_not_grow_with_the_size_of_what_is_read`, 4KB to 4MB | 6/6 under `--frame`; a 10M-token BABILong instance in nine steps | **held** |
 | **infinite writing** | `test_the_request_does_not_grow_with_the_size_of_what_is_written`, 10,000 lines | two rows, both 100% correct: **ten times the output and the largest request fell 5.1%** | **held** |
-| **infinite complexity** | more steps do not grow the request | 2 of 5 arms, n=1 per arm, on the one task | **open** |
+| **infinite complexity** | more steps do not grow the request | **3 of 3** on the hard task (4.9); largest request spans 232 tokens across them | **held, on one task** |
 
-One clause left, and one thing follows about it.
+**All four clauses now have live evidence, and this is the first time.** That is
+the first Design Test met, on the terms it is written in — with three limits
+stated rather than buried, below.
 
-**The scaffold half is done and it is the easy half.** Every one of those
-scaffold-side tests drives a `FakeModel`. They prove the *scaffold* does not
-grow, which is a real property and is not the claim. "Complete tasks however
-complicated they are" is a claim about a model working inside the thing, and only
-a live run can speak to it.
+**The scaffold half was always the easy half.** Every one of those scaffold-side
+tests drives a `FakeModel`. They prove the *scaffold* does not grow, which is a
+real property and is not the claim. "Complete tasks however complicated they are"
+is a claim about a model working inside the thing, and only a live run can speak
+to it — which is why the table above has two columns and why the right-hand one
+was empty for two of the four clauses until this letter.
+
+**What "held" does not mean.** Three things, and none of them is a quibble:
+
+1. **Complexity is one task.** `step_loop.py` is the task this whole series was
+   shaped by, so passing it three times says the shape is right and does not say
+   the scaffold is general. SWE-bench under `--frame` has never been run (§5) and
+   the flagship reconstruct task has never been run under 0.0.8 at all.
+2. **Writing is script-derivable.** Both `volume` rows were won by writing a
+   regex, so what they show is a context holding still while an artefact outgrows
+   it — not a run producing output that needs a generation per unit. The harder
+   version is §5 item 4.
+3. **Nothing here is attributed.** 3/3 against 2/5 is four changes at once
+   (4.9). The measurement is sound; the explanation is not in hand.
 
 **Infinite writing had no live evidence at all, and nobody noticed.** §4.7 lists
 the two Design Tests with no evidence and this was not on the list, because the
@@ -587,12 +690,10 @@ Two things about it are worth knowing before reading its results:
   and not about where the characters came from. What separates the two routes is
   measured rather than forbidden: `generated_chars` against the bytes on disk.
 
-So one clause is left — complexity — and it needs the width arms. This iteration
-made them cost one command instead of an afternoon (§1, `eval.run width`), and
-they have not been run: they are six 80-step runs, which is hours and real spend,
-and that is a decision rather than a step. Tier 3 of §4.1's mechanism is fitted
-to the five old arms and has exactly two live runs against it, both of which
-passed — so it is flagged, not believed.
+The five live runs of this letter cost about 75 minutes of wall clock and 2.3M
+tokens between them, which is the other thing worth writing down: making the
+probes one command each (§1) is what turned "an afternoon per arm" into an
+afternoon for the whole table.
 
 Credentials come from `.env` — `src/infinite/__init__.py` calls `load_dotenv()`,
 so importing the package is enough and nothing needs exporting, as long as the
@@ -608,19 +709,16 @@ Ordered by what each buys, cheapest first.
 Items 0 and 4 are done — 4.6's one line, and 4.1's three tiers. Everything left
 needs an API key, which is why it is a list rather than a result.
 
-1. **Three runs of `--arm baseline`, and three of `--arm no-stall-charge`.**
-   This is now one command each (`eval.run width -n 3 --profile frame`) and it
-   answers four questions at once: whether "2 of 5 passed" replicates at all;
-   whether the 4.0 geometry changed it, since removing `lookup` moved the fixed
-   half of every request and no arm is a like-for-like comparison any more;
-   whether pricing a livelock does anything; and 4.5's question for free, since
-   `facts.md` is now present from step one with nothing but the agent to fill
-   it. Read them with `eval.analyse`, which reports the streaks.
-2. **Grade the runs on the streaks, not only on pass/fail.** Six 80-step runs
-   give twelve-odd frames, which is enough to say whether the separation in
-   §4.1 survives contact with the real measure rather than the proxy. If it
-   does, `stall_notice` has a number behind it; if it does not, tier 3 comes
-   out and tier 1 stays.
+1. **Attribute 4.9's 3/3.** The baseline is run; what is missing is the
+   comparison. Four things changed at once, and two arms separate them:
+   `--arm no-stall-charge` x3 rules the price in or out (it collected two budget
+   units across the three baseline runs, so the prior is "out"), and a run with
+   `facts.md` withheld would test 4.5's candidate, which is the one the evidence
+   currently points at. Three runs each, about 20 minutes apiece.
+2. **Then decide whether tier 3 survives.** It has charged 14 budget units across
+   five live runs and 11 of them fell on one run that was genuinely looping. That
+   is the right shape and it is five runs. If `no-stall-charge` also goes 3/3, the
+   price is buying nothing measurable and tier 1 alone is the honest ship.
 3. **Settle 4.3.** Three runs with a *gradient* check against three with a
    binary one — a check that counts remaining stub bodies and prints the count,
    versus one that only passes at zero. It is the only item that could change a

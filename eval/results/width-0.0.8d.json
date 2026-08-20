@@ -1,0 +1,218 @@
+{
+ "probe": "width — infinite complexity (Design Tests, clause 4)",
+ "task": "replace the infinite_agent/step_loop.py stub; the module calls into six siblings",
+ "geometry": "--profile frame, --arm baseline, --max-steps 80, charged across the subtree",
+ "note": "The task that defeated 0.0.7 four times and passed 2 of 5 arms in 0.0.8. These are the first runs on the 0.0.8d geometry: no `lookup`, facts.md present from step one, the progress measure and its price, and a live check passed by the harness. Four changes at once, so 3/3 is a result and not a cause. runs/ is gitignored; this file is the evidence.",
+ "runs": [
+  {
+   "run": "steploop-0",
+   "correct": true,
+   "imports": true,
+   "stubs_left": 0,
+   "module_lines": 550,
+   "steps": 71,
+   "agents": 3,
+   "seconds": 1549.2,
+   "max_request_tokens": 7867,
+   "context_ceiling": 15819,
+   "tokens_in": 486830,
+   "tokens_out": 50428,
+   "stalls": 4,
+   "longest_stall_streak": 1,
+   "livelocks": 0,
+   "per_agent": [
+    {
+     "agent": "35f87836",
+     "depth": 1,
+     "steps": 11,
+     "charged": 8,
+     "stalled_budget": 0,
+     "cost": 19,
+     "ok": true,
+     "progress": {
+      "steps": 11,
+      "stalls": 1,
+      "longest_stall_streak": 1,
+      "scan_seconds": 0.005
+     },
+     "stall_streaks": [
+      1
+     ],
+     "spawned_at": 10,
+     "wrote_module_at": 9
+    },
+    {
+     "agent": "bd1f8dae",
+     "depth": 2,
+     "steps": 8,
+     "charged": 0,
+     "stalled_budget": 0,
+     "cost": 8,
+     "ok": true,
+     "progress": {
+      "steps": 8,
+      "stalls": 1,
+      "longest_stall_streak": 1,
+      "scan_seconds": 0.005
+     },
+     "stall_streaks": [
+      1
+     ],
+     "spawned_at": null,
+     "wrote_module_at": 7
+    },
+    {
+     "agent": "fe85d660",
+     "depth": 0,
+     "steps": 52,
+     "charged": 19,
+     "stalled_budget": 0,
+     "cost": 71,
+     "ok": true,
+     "progress": {
+      "steps": 52,
+      "stalls": 2,
+      "longest_stall_streak": 1,
+      "scan_seconds": 0.022
+     },
+     "stall_streaks": [
+      1,
+      1
+     ],
+     "spawned_at": 50,
+     "wrote_module_at": null
+    }
+   ]
+  },
+  {
+   "run": "steploop-1",
+   "correct": true,
+   "imports": true,
+   "stubs_left": 0,
+   "module_lines": 350,
+   "steps": 71,
+   "agents": 2,
+   "seconds": 975.7,
+   "max_request_tokens": 8099,
+   "context_ceiling": 15761,
+   "tokens_in": 474648,
+   "tokens_out": 64701,
+   "stalls": 6,
+   "longest_stall_streak": 4,
+   "livelocks": 1,
+   "per_agent": [
+    {
+     "agent": "d72c993e",
+     "depth": 0,
+     "steps": 33,
+     "charged": 38,
+     "stalled_budget": 2,
+     "cost": 71,
+     "ok": true,
+     "progress": {
+      "steps": 33,
+      "stalls": 5,
+      "longest_stall_streak": 4,
+      "scan_seconds": 0.014
+     },
+     "stall_streaks": [
+      1,
+      4
+     ],
+     "spawned_at": 28,
+     "wrote_module_at": 26
+    },
+    {
+     "agent": "ddcb5277",
+     "depth": 1,
+     "steps": 38,
+     "charged": 0,
+     "stalled_budget": 0,
+     "cost": 38,
+     "ok": false,
+     "progress": {
+      "steps": 38,
+      "stalls": 1,
+      "longest_stall_streak": 1,
+      "scan_seconds": 0.019
+     },
+     "stall_streaks": [
+      1
+     ],
+     "spawned_at": null,
+     "wrote_module_at": 36
+    }
+   ]
+  },
+  {
+   "run": "steploop-2",
+   "correct": true,
+   "imports": true,
+   "stubs_left": 0,
+   "module_lines": 377,
+   "steps": 63,
+   "agents": 2,
+   "seconds": 691.4,
+   "max_request_tokens": 7958,
+   "context_ceiling": 15753,
+   "tokens_in": 416562,
+   "tokens_out": 46142,
+   "stalls": 3,
+   "longest_stall_streak": 1,
+   "livelocks": 0,
+   "per_agent": [
+    {
+     "agent": "54807bd1",
+     "depth": 1,
+     "steps": 40,
+     "charged": 0,
+     "stalled_budget": 0,
+     "cost": 40,
+     "ok": true,
+     "progress": {
+      "steps": 40,
+      "stalls": 1,
+      "longest_stall_streak": 1,
+      "scan_seconds": 0.019
+     },
+     "stall_streaks": [
+      1
+     ],
+     "spawned_at": null,
+     "wrote_module_at": 39
+    },
+    {
+     "agent": "55164933",
+     "depth": 0,
+     "steps": 23,
+     "charged": 40,
+     "stalled_budget": 0,
+     "cost": 63,
+     "ok": true,
+     "progress": {
+      "steps": 23,
+      "stalls": 2,
+      "longest_stall_streak": 1,
+      "scan_seconds": 0.009
+     },
+     "stall_streaks": [
+      1,
+      1
+     ],
+     "spawned_at": 21,
+     "wrote_module_at": 19
+    }
+   ]
+  }
+ ],
+ "facts_md": [
+  "# facts",
+  "# One resolved fact per line, appended as it is resolved. `grep` before you go",
+  "# looking; a fact another agent paid for is one you should not pay for twice.",
+  "step_loop.py: stub imports ToolRegistry (nonexistent) -> real class is ToolDispatcher in tools.py",
+  "step_loop.py: stub imports name T from trajectory (nonexistent) -> use typing directly",
+  "tools.py public: ToolResult, tool_schemas, PersistentShell, ToolDispatcher",
+  "trajectory.py public: TrajectoryWriter (ctx mgr), read_trajectory(path), resume_state(path, config)->(RegisterFile,int)",
+  "summariser.py public: call_model, render_step_for_summary(step,cfg), build_summary_messages"
+ ]
+}

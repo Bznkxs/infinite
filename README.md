@@ -338,11 +338,20 @@ not that either run succeeds but that the largest request does not move between
 the two rows while the output does. It generates its corpus from a seed, so it
 needs no network and works on a fresh clone.
 
-`volume` has been run and the clause holds: 120 records then 1,200, every field
-of every card correct in both, **ten times the output and the largest request
-5.1% smaller** — 106,274 bytes produced from 8,594 generated tokens against a
-6,446-token request. The rows are in
-[`eval/results/volume-0.0.8d.json`](eval/results/volume-0.0.8d.json).
+Both have been run, and both clauses hold.
+
+`volume`: 120 records then 1,200, every field of every card correct in both,
+**ten times the output and the largest request 5.1% smaller** — 106,274 bytes
+produced from 8,594 generated tokens against a 6,446-token request
+([`eval/results/volume-0.0.8d.json`](eval/results/volume-0.0.8d.json)).
+
+`width`: **three of three**, modules of 550, 350 and 377 lines that all import
+with no stub left, graded by running the interpreter rather than by reading the
+response. The largest request across the three spans **232 tokens** — 7,867 to
+8,099 — which is the fixed-context property on the task this whole series was
+shaped by. It is one task and three runs, and four things changed at once against
+the 0.0.8 arms' 2 of 5, so it is a result rather than an explanation
+([`eval/results/width-0.0.8d.json`](eval/results/width-0.0.8d.json)).
 
 ```bash
 uv run python -m eval.run babilong --config 10M --split qa2 -n 1 --profile short
