@@ -413,7 +413,7 @@ SHORT = dict(
     #: sentence come to about 1,200 tokens of fixed constant that 0.0.7g did not
     #: pay. The register geometry is unchanged to the character, so this preset
     #: is still 0.0.7g's *input*; what it is not any more is 0.0.7g's price.
-    max_context_tokens=9000,
+    max_context_tokens=9500,
 )
 
 
@@ -428,7 +428,14 @@ SHORT = dict(
 FRAME = dict(
     num_registers=11,
     max_register_length=208,
-    max_special_length=1536,
+    #: Register 4, and 1,536 at 0.0.7g. Across the 0.0.8 runs the summariser
+    #: overshot on thirteen attempts, at a median of 1,598 characters and a
+    #: maximum of 1,822 — against a budget of 600 it was told. That is 0.0.5's
+    #: lesson at this scale: the budget in the prompt does not set the length,
+    #: the material does, and what the register is for is holding the overshoot.
+    #: Each overshoot bought a whole extra generation; 512 more characters buys
+    #: them all back for about 197 tokens of dump.
+    max_special_length=2048,
     max_target_length=704,
     #: 240 at 0.0.7g, and the first live 0.0.8 run is what moved it: a child
     #: spent 27 steps re-reading the same four files and wrote nothing, and its

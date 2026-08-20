@@ -121,8 +121,8 @@ def test_the_short_configuration_fits_under_its_ceiling(tmp_path):
         return_schema={"type": "object", "properties": {"answer": {"type": "string"}}},
     )
 
-    assert agent.config.max_context_tokens == 9000
-    assert agent.context["total_tokens"] <= 9000
+    assert agent.config.max_context_tokens == 9500
+    assert agent.context["total_tokens"] <= 9500
     # And the agent's own share of it is reported beside the total, because a
     # scaffold that grows its prose to buy the agent room should show both.
     assert agent.context["working_set_chars"] == 5 * 208 + 1536 + 704

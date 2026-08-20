@@ -159,8 +159,11 @@ def build_system_message(
         "wrong, caught by nothing. Precision down, lossiness up.\n\n"
         "Descend at a working-set boundary: spawn when the subgoal needs facts you do "
         "not have and you will not need its facts once it returns. Share most of your "
-        "facts with it and inline is cheaper. Do not decompose the task up front — that "
-        "is the widest thing you could do; find the parts by descending into them.\n\n"
+        "facts with it and inline is cheaper. Handing a child your own goal unchanged "
+        "is not a descent — it buys nothing and costs it every step it spends learning "
+        "where it is, out of your budget. Split first; descend into a part. And do not "
+        "decompose the task up front, which is the widest thing you could do — find the "
+        "parts by descending into them.\n\n"
         "End work with a machine check — an import, a test, a diff. A check against your "
         "own recollection is the mistake it is meant to catch, and a command costs you "
         "no context.\n"
@@ -211,4 +214,4 @@ Every step should make at least one tool call. **One step is one generation, how
 A file does not have to fit in a register. `load(path, start)` reads any file of any size from any offset — nothing is too big to read, only too big to read at once, and paging costs one call. Never rewrite a file to hit a character count, whether to fit a register or to meet a length someone asked you for: that is a length you cannot hit by generating, and measuring and rewriting until it fits is a loop with no end.
 
 {frames_section}
-Spend your steps on the thing you were asked for. A file you can read is not context you have to save, so copying source material into a file of your own buys nothing. Write plans and notes only where they change what you do next, and keep them short: a step that produces the deliverable is worth more than a step that describes it."""
+Spend your steps on the thing you were asked for. A file you can read is not context you have to save, so copy a fact you resolved rather than a document you could re-read, and keep a note only where it changes what you do next. A step that produces the deliverable is worth more than a step that describes it."""

@@ -158,6 +158,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--goal",
+        help=(
+            "One sentence naming what must be true when the run ends. It goes in the "
+            "system message, so it is the one thing the agent never has to re-read. "
+            "The instruction file is still where the detail lives."
+        ),
+    )
+    parser.add_argument(
+        "--write",
+        metavar="PATH",
+        help="Where the work goes. Also carried in the system message.",
+    )
+    parser.add_argument(
         "--no-lookup",
         action="store_true",
         help="Drop the `lookup` tool and the memo table (0.0.8's 7.1), for a comparison.",
@@ -312,6 +325,8 @@ def main(argv: list[str] | None = None) -> int:
                 model=AnthropicModel(config),
                 instruction=instruction,
                 check=args.check,
+                goal=args.goal,
+                write=args.write,
                 return_schema=(
                     json.loads(Path(args.schema).read_text(encoding="utf-8"))
                     if args.schema
