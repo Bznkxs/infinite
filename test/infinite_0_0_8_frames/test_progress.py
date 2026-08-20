@@ -167,7 +167,7 @@ def test_stalls_in_a_row_accumulate_and_a_move_clears_them(tmp_path):
         assert progress.record(target="", check=None)["stall_streak"] == expected
     (root / "out.py").write_text("x = 1\n")
     assert progress.record(target="", check=None)["stall_streak"] == 0
-    assert progress.summary() == {
+    assert {k: v for k, v in progress.summary().items() if k != "scan_seconds"} == {
         "steps": 5, "stalls": 4, "longest_stall_streak": 4,
     }
 
@@ -271,9 +271,9 @@ def test_an_unfinished_agent_hands_its_parent_the_streak(tmp_path):
 
     assert not result.ok and result.handoff_path is not None
     handoff = json.loads(result.handoff_path.read_text())
-    assert handoff["progress"] == {
-        "steps": 3, "stalls": 3, "longest_stall_streak": 3,
-    }
+    assert {
+        k: v for k, v in handoff["progress"].items() if k != "scan_seconds"
+    } == {"steps": 3, "stalls": 3, "longest_stall_streak": 3}
 
 
 # --- the price, which is what bounds a livelock ---------------------------
@@ -378,3 +378,55 @@ def test_a_parent_is_not_billed_for_its_childs_surcharge(tmp_path):
         next(parent.workspace.root.glob("handoff-*.json")).read_text()
     )
     assert handoff["progress"]["longest_stall_streak"] == 4
+
+
+# --- the cost of measuring ------------------------------------------------
+
+
+def test_the_scan_prunes_the_directories_it_ignores_rather_than_filtering_them(
+    tmp_path,
+):
+    """The whole performance story. `tool_output/` gains a file per tool call and
+    a long run's trajectories are the largest things in the workspace; walking
+    them and discarding them afterwards cost 350ms a step on a real
+    reconstruction workspace and 8.6 seconds on a pathological one. Pruned, the
+    same scans are single-digit milliseconds.
+    """
+    from infinite.progress import scan
+
+    root = tmp_path / "w"
+    (root / "tool_output").mkdir(parents=True)
+    (root / ".scratch" / "abc" / "reg").mkdir(parents=True)
+    (root / ".scratch" / "abc" / "notes").mkdir()
+    for i in range(50):
+        (root / "tool_output" / f"out{i}.json").write_text("{}")
+        (root / ".scratch" / "abc" / "reg" / str(i)).write_text("v")
+    (root / ".scratch" / "abc" / "notes" / "goal.md").write_text("# goal\n")
+    (root / "work.py").write_text("x = 1\n")
+    (root / "trajectory-abc12345.jsonl").write_text("{}\n")
+
+    # Only the agent's own work: its scratch notes and the file it wrote.
+    assert set(scan(root)) == {"work.py", ".scratch/abc/notes/goal.md"}
+
+
+def test_a_nested_directory_of_the_agents_own_is_walked(tmp_path):
+    """Pruning is by name at a known depth, so it must not prune a `cache/` the
+    agent made in its own work tree."""
+    from infinite.progress import scan
+
+    root = tmp_path / "w"
+    (root / "src" / "cache").mkdir(parents=True)
+    (root / "src" / "cache" / "keep.py").write_text("x = 1\n")
+
+    assert set(scan(root)) == {"src/cache/keep.py"}
+
+
+def test_the_measure_reports_what_it_cost(tmp_path):
+    """Kept rather than capped: a cap would degrade the measure exactly where a
+    livelock is most expensive."""
+    root = tmp_path / "w"
+    root.mkdir()
+    progress = Progress(root)
+    progress.record(target="", check=None)
+
+    assert progress.summary()["scan_seconds"] >= 0.0

@@ -225,3 +225,113 @@ def test_the_arms_the_probes_are_run_with_reach_the_config_they_name():
     assert config_for("no-stall-notice").stall_notice is None
     assert config_for("no-live-check").check_every_step is False
     assert config_for("depth-1").max_depth == 1
+
+
+# --- end to end, without a key -------------------------------------------
+
+
+def test_the_writing_probe_runs_end_to_end_against_a_scripted_model(tmp_path):
+    """Instance -> workspace -> agent -> live check -> grade, with no API.
+
+    Everything above this tests one piece. What kills a live run is the seam:
+    a corpus the firewall will not let the agent read, a `check` that cannot run
+    inside the sandbox, an output file the grader looks for in the wrong place.
+    Each of those is a three-hour run that dies in its first minute, and none of
+    them shows up until someone spends the three hours.
+
+    The script takes the program route on purpose — `bash` is unbounded by
+    design and the probe says so — which also puts `python3` under the firewall,
+    which is §4.6's hazard.
+    """
+    from infinite.agent import Agent
+    from infinite.config import frame_config
+    from infinite.workspace import Workspace
+    from test.infinite_0_0_1_simple.fake_model import FakeModel, step, tool_use
+
+    instance = volume.load(config="30")[0]
+    root = tmp_path / "runs"
+    workspace_dir = instance.write(root)
+    agent = Agent(
+        config=frame_config(max_steps=6, summary=False),
+        workspace=Workspace(workspace_dir),
+        model=FakeModel([]),
+        instruction=instance.task,
+        return_schema=instance.schema,
+        check=instance.truth["check"],
+    )
+    program = f'''python3 - <<'EOF'
+import re
+text = open("{volume.SOURCE}").read()
+out = []
+for block in text.split("## record ")[1:]:
+    key = re.search(r"key: (\\S+)", block).group(1)
+    m = re.search(
+        r"The (\\w+) in the (\\w+) is (\\w+)\\. (\\w+) signed for it at (\\d\\d:\\d\\d)\\."
+        r"\\s+It\\s+weighs (\\d+)kg", block)
+    item, room, colour, keeper, time, weight = m.groups()
+    out.append(
+        f"### {{key}}\\nitem: {{item}}\\ncolour: {{colour}}\\nroom: {{room}}\\n"
+        f"keeper: {{keeper}}\\ntime: {{time}}\\nweight: {{weight}}\\n")
+open("{volume.OUTPUT}", "w").write("\\n".join(out))
+EOF'''
+    answer = '{"answer": "30 cards", "evidence": "check passed"}'
+    agent.model.script = [
+        step(tool_use("bash", command=program, register_id=6)),
+        step(tool_use(
+            "bash",
+            command=f"printf '%s' '{answer}' > {agent.response_path.name}",
+        )),
+    ]
+    try:
+        result = agent.run()
+    finally:
+        agent.bash.close()
+
+    # The scaffold's own verdict: the response was accepted, which means the
+    # acceptance command ran inside the sandbox and succeeded.
+    assert result.ok, result.error
+    verdict = volume.grade(result.response, instance.truth, workspace=workspace_dir)
+    assert verdict["correct"] and verdict["coverage"] == 1.0
+    assert verdict["cards_written"] == 30
+    # And the request did not grow while the file did.
+    assert agent.context["total_tokens"] == frame_config().context_tokens(
+        agent.context["fixed_chars"]
+    )["total_tokens"]
+
+
+def test_a_wrong_output_is_refused_by_the_check_rather_than_by_the_grader(tmp_path):
+    """The count is the acceptance command's whole competence, and it is enough
+    to refuse a run that wrote too few cards — which is the case that matters,
+    since a truncated run is the expected failure at 1,200."""
+    from infinite.agent import Agent
+    from infinite.config import frame_config
+    from infinite.workspace import Workspace
+    from test.infinite_0_0_1_simple.fake_model import FakeModel, step, tool_use
+
+    instance = volume.load(config="30")[0]
+    workspace_dir = instance.write(tmp_path / "runs")
+    agent = Agent(
+        config=frame_config(max_steps=3, summary=False),
+        workspace=Workspace(workspace_dir),
+        model=FakeModel([]),
+        instruction=instance.task,
+        return_schema=instance.schema,
+        check=instance.truth["check"],
+    )
+    answer = '{"answer": "all done", "evidence": "trust me"}'
+    agent.model.script = [
+        step(tool_use(
+            "bash",
+            command=(
+                f"printf '### AAAAA\\nitem: kettle\\n' > {volume.OUTPUT}; "
+                f"printf '%s' '{answer}' > {agent.response_path.name}"
+            ),
+        ))
+    ] * 3
+    try:
+        result = agent.run()
+    finally:
+        agent.bash.close()
+
+    assert not result.ok
+    assert result.check_failure is not None

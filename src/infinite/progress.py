@@ -30,11 +30,21 @@ Three terms, and only the third is a defect:
 What is *not* measured here is repetition. Reading one file twice is progress if
 something happened in between and a loop if nothing did, so the second read is
 not the observable — the nothing in between is.
+
+One limitation to know about. The unit is the workspace, and a workspace is
+shared by every agent in a run — so while siblings run concurrently, a file one
+of them writes counts as progress for all of them. A parent is unaffected (it
+takes no steps while it waits), and attributing a write to a frame is not
+possible anyway through a `bash` that is deliberately unbounded. So in a fan-out
+this measure has false negatives and no false positives: a frame that is told it
+has stalled has stalled.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +58,10 @@ IGNORED_DIRS = ("tool_output",)
 #: (rewritten around every shell command), and the caches `Workspace.environment`
 #: points here so that the sandbox is invisible to `python3`.
 IGNORED_SCRATCH = ("reg", "tmp", "cache", "pycache")
+
+#: `Workspace.SCRATCH_DIR`, repeated rather than imported: `workspace` imports
+#: nothing and this file should not be the one that makes them circular.
+SCRATCH = ".scratch"
 
 #: The scaffold's own writing about an agent, rather than an agent's work. A
 #: child's trajectory grows while its parent waits, so a parent that counted
@@ -87,29 +101,48 @@ def _ignored(relative: Path) -> bool:
     return False
 
 
+def _prune(relative: Path, name: str) -> bool:
+    """Whether to skip a whole directory rather than walk into it."""
+    parts = relative.parts
+    if not parts:  # the root's own children
+        return name in IGNORED_DIRS
+    if parts[0] == SCRATCH and len(parts) == 2:
+        return name in IGNORED_SCRATCH
+    return False
+
+
 def scan(root: Path) -> dict[str, tuple[int, int]]:
     """Every file the agent could have written, as path -> (mtime_ns, size).
 
-    Cheap by design: one `stat` per file and no reads, so it costs the same on a
-    ten-megabyte corpus as on a stub. A file that was rewritten with identical
-    contents still counts as a change — the agent did something, and deciding
-    otherwise would mean hashing the workspace every step.
+    One `stat` per file and no reads, so it costs the same on a ten-megabyte
+    corpus as on a stub — volume is free here, and only the *number* of files
+    matters. A file rewritten with identical contents still counts as a change:
+    the agent did something, and deciding otherwise would mean hashing the
+    workspace every step.
+
+    The ignored directories are pruned rather than filtered, which is the whole
+    performance story. `tool_output/` gains a file per tool call and a long run's
+    trajectories are the largest things in the workspace, so walking them and
+    discarding them afterwards cost 350ms a step on a real reconstruction
+    workspace and 8.6 seconds on a pathological one. Pruned, the same scans are
+    a few milliseconds.
     """
     state: dict[str, tuple[int, int]] = {}
     root = Path(root)
-    for path in root.rglob("*"):
-        try:
-            if not path.is_file():
+    for directory, subdirs, files in os.walk(root, followlinks=False):
+        here = Path(directory)
+        relative = here.relative_to(root) if here != root else Path()
+        subdirs[:] = [name for name in subdirs if not _prune(relative, name)]
+        for name in files:
+            if IGNORED_FILES.match(name):
                 continue
-            relative = path.relative_to(root)
-            if _ignored(relative):
+            try:
+                info = (here / name).stat()
+            except OSError:
+                # A file that vanished mid-scan is a change either way, and the
+                # next scan will see it gone.
                 continue
-            info = path.stat()
-        except OSError:
-            # A file that vanished mid-scan is a change either way, and the next
-            # scan will see it gone.
-            continue
-        state[str(relative)] = (info.st_mtime_ns, info.st_size)
+            state[str(relative / name)] = (info.st_mtime_ns, info.st_size)
     return state
 
 
@@ -127,10 +160,19 @@ class Progress:
         self.longest = 0
         self.stalls = 0
         self.steps = 0
+        #: What the measure itself cost. One `stat` per file, so it scales with
+        #: the number of files and not with their size: 0.6ms on a probe
+        #: workspace, 124ms on the flagship reconstruction's 6,400 files. Kept
+        #: rather than capped — a cap would degrade the measure exactly where a
+        #: livelock is most expensive, and a number in the record is how anything
+        #: else in this project gets decided.
+        self.scan_seconds = 0.0
 
     def record(self, *, target: str, check: str | None) -> dict[str, Any]:
         """Close a step: what changed, and how long the run of nothing is now."""
+        clock = time.monotonic()
         files = scan(self.root)
+        self.scan_seconds += time.monotonic() - clock
         created = sorted(set(files) - set(self._files))
         removed = sorted(set(self._files) - set(files))
         modified = sorted(
@@ -162,11 +204,12 @@ class Progress:
             "paths": touched[:NAMED_PATHS],
         }
 
-    def summary(self) -> dict[str, int]:
+    def summary(self) -> dict[str, Any]:
         return {
             "steps": self.steps,
             "stalls": self.stalls,
             "longest_stall_streak": self.longest,
+            "scan_seconds": round(self.scan_seconds, 3),
         }
 
 

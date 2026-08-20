@@ -288,9 +288,28 @@ nothing about what the steps left behind.
 1. **Measured.** `progress.py`. Every step records what durable state it
    changed, into the trajectory; the streak goes in the handoff, so a parent
    deciding whether to resume a child knows whether that child was moving.
-   `analyse.py` grew `stall / worst / lock` columns. The measure costs nothing:
-   one `stat` per file in the workspace, no reads, so it is the same price on a
-   ten-megabyte corpus as on a stub.
+   `analyse.py` grew `stall / worst / lock` columns. One `stat` per file and no
+   reads, so volume is free and only the *number* of files costs anything:
+   0.6ms a step on a probe workspace, 124ms on the flagship reconstruction's
+   6,400 files. The ignored trees are pruned rather than filtered, which is the
+   whole of that — walking `tool_output/` and the trajectories and discarding
+   them afterwards cost 350ms a step and 8.6 seconds on a pathological
+   workspace. The cost is recorded per agent rather than capped, because a cap
+   would degrade the measure exactly where a livelock is most expensive.
+
+   Two things it deliberately does not count. A `spawn` is not progress by
+   itself — the parent sees the child's files, handoff and response soon enough,
+   and 4.4's cascade was four frames forwarding a goal and writing nothing.
+   And the first verdict of a checked run is not progress, because the scaffold
+   ran the check, not the agent; counting it made the opening step of every run
+   look like it moved, which is the step that matters most.
+
+   One limitation. The unit is the workspace and a workspace is shared, so while
+   siblings run concurrently a file one writes counts for all of them. A parent
+   is unaffected, since it takes no steps while it waits, and attribution is not
+   possible anyway through a `bash` that is unbounded by design. In a fan-out the
+   measure therefore has false negatives and no false positives: a frame told it
+   has stalled has stalled.
 2. **Shown.** A `[Stall]` line in the dump once the streak reaches
    `stall_notice` (3). It is state beside the budget line, not a sentence in the
    system message — which is the whole design argument: the budget line is the
