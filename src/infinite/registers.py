@@ -98,6 +98,7 @@ class RegisterFile:
         charged: int = 0,
         depth: int | None = None,
         check: str | None = None,
+        stall: str | None = None,
     ) -> str:
         """The register dump that makes up the model's context each step.
 
@@ -124,6 +125,12 @@ class RegisterFile:
         agent's recollection, and it is the thing 7.3 says should replace
         acquiring an interface: a run that is told every step whether its work
         imports does not have to read six modules to find out.
+
+        `stall` is 0.0.8d §4.1, and it is here rather than in the system message
+        for the same reason the step counter is: it is *state*, and the one kind
+        of state five runs show the agent acts on. It appears only while the run
+        of steps that changed nothing is long enough to be a livelock, so a run
+        that is working never pays for it.
         """
         lines = []
         if step is not None or depth is not None:
@@ -145,6 +152,8 @@ class RegisterFile:
             lines.append(f"[Step] {spent}")
         if check:
             lines.append(f"[Check] {check}")
+        if stall:
+            lines.append(f"[Stall] {stall}")
         lines.append("[Registers]")
         for i, value in enumerate(self.values):
             # The name comes first: with five special registers, "register 3"

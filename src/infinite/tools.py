@@ -1,4 +1,4 @@
-"""The tools: bash, load, set, set_target, lookup, spawn, resume.
+"""The tools: bash, load, set, set_target, spawn, resume.
 
 Every tool *may* take a destination register for its return information; since
 0.0.8a §4 it is optional, and omitting it discards the payload rather than
@@ -154,33 +154,6 @@ def tool_specs(config: Config, *, spawn: bool = True) -> list[dict[str, Any]]:
             },
         },
     ]
-    if config.lookup:
-        specs.append(
-            {
-                "name": "lookup",
-                "description": (
-                    "One line per definition — where it is and what it takes. Give it a "
-                    "symbol for one fact, or a file for the whole surface of a module, "
-                    "which is how you learn to call into one without reading it. A "
-                    "working set is then lines rather than pages."
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "symbol": {
-                            "type": "string",
-                            "description": (
-                                "A name, `Class.method`, a fragment — or a path "
-                                "(`src/registers.py`, `pkg.registers`) for every "
-                                "definition in that file."
-                            ),
-                        },
-                        "register_id": destination,
-                    },
-                    "required": ["symbol"],
-                },
-            }
-        )
     specs.append(
         {
             "name": "spawn",
@@ -297,10 +270,6 @@ class ToolBox:
             "spawn": self._spawn,
             "resume": self._resume,
         }
-        if not self.config.lookup:
-            handlers.pop("lookup", None)
-        else:
-            handlers["lookup"] = self._lookup
         if not self.agent.can_spawn:
             # Not offered, so this is a model calling a tool it was not given —
             # refused here too, because that is where recursion would start.
@@ -506,56 +475,6 @@ class ToolBox:
                 "register_id": target,
                 "content": content,
                 "status": status,
-            },
-        )
-
-    def _lookup(self, call: ToolCall) -> ToolResult:
-        """7.1: turn width into depth — a signature costs a line, not a page."""
-        symbol = call.input.get("symbol")
-        if not isinstance(symbol, str):
-            return self._failed(call, "error: 'symbol' must be a string")
-        register_id, error = self._destination(call)
-        if error:
-            return self._failed(call, error)
-
-        index = self.agent.index
-        path = index._as_path(symbol)
-        if path is not None:
-            hits, total = index.outline(path, self.config.lookup_max_outline)
-            # A dotted name that names nothing is more likely a symbol with a
-            # dot in it than a module, so fall back rather than report a miss.
-            if not hits:
-                hits, total = index.lookup(symbol, self.config.lookup_max_matches)
-        else:
-            hits, total = index.lookup(symbol, self.config.lookup_max_matches)
-        if not hits:
-            payload = ""
-            status = (
-                f"no definition of {symbol!r} in the workspace's Python. "
-                "It may be in another language, imported from elsewhere, or spelled "
-                "differently — `grep` for it."
-            )
-        else:
-            payload = "\n".join(hit.render() for hit in hits)
-            status = f"OK lookup {symbol!r}: {len(hits)} of {total}"
-            if total > len(hits):
-                status += " (narrow it, or grep)"
-            # The memo table of 0.0.8b §4, kept by the scaffold for the half an
-            # AST can know. What it cannot know — that a return is None on
-            # cut-off, which of two plausible functions this project uses — the
-            # agent appends itself, and `grep` is the whole of the query.
-            self.agent.workspace.remember(hit.render() for hit in hits)
-        return ToolResult(
-            name="lookup",
-            register_id=register_id,
-            payload=payload,
-            status=status,
-            record={
-                "tool": "lookup",
-                "register_id": register_id,
-                "symbol": symbol,
-                "matches": total,
-                "content": payload,
             },
         )
 

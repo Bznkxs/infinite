@@ -35,6 +35,28 @@ SYSTEM_READ_LINUX = (
     "/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt",
 )
 
+
+#: The interpreter running the scaffold, which is not necessarily under any of
+#: the paths above. Under `uv run`, `python3` on the agent's PATH resolves into
+#: `.venv/bin/` and from there into `~/.local/share/uv/python/cpython-…`, so a
+#: sandboxed shell that reached for it could not read its own stdlib and died
+#: with `ModuleNotFoundError: No module named 'encodings'` — with stderr
+#: swallowed, an empty register and no explanation. Every `check` in the 0.0.8
+#: arms was a `python3 -c 'import …'` and they worked only because those runs
+#: happened to resolve `python3` to `/usr/bin/python3`. Whichever interpreter
+#: this scaffold is running under is one the agent may read.
+def system_read(platform: str | None = None) -> tuple[str, ...]:
+    base = SYSTEM_READ_DARWIN if (platform or sys.platform) == "darwin" else SYSTEM_READ_LINUX
+    extra = []
+    for root in (sys.base_prefix, sys.prefix, os.path.realpath(sys.base_prefix)):
+        resolved = str(Path(root).resolve())
+        if resolved in extra or any(
+            resolved == p or resolved.startswith(p + "/") for p in base
+        ):
+            continue
+        extra.append(resolved)
+    return base + tuple(extra)
+
 #: Files inside the workspace that record the run and are never the agent's to
 #: write. The chmod in `Trajectory` is advisory — the owner can always undo it;
 #: under the sandbox this is the rule that actually holds.
@@ -165,7 +187,7 @@ class Firewall:
     def seatbelt_profile(self) -> str:
         workspace = _escape(str(self.workspace))
         reads = "\n".join(
-            f'  (subpath "{_escape(p)}")' for p in SYSTEM_READ_DARWIN
+            f'  (subpath "{_escape(p)}")' for p in system_read("darwin")
         )
         allowed = "\n".join(
             f'  (subpath "{_escape(str(p))}")' for p in self.readable
@@ -214,7 +236,7 @@ class Firewall:
     # --- Linux ---------------------------------------------------------
     def bwrap_args(self) -> list[str]:
         args = ["bwrap", "--die-with-parent", "--proc", "/proc", "--dev", "/dev"]
-        for path in SYSTEM_READ_LINUX:
+        for path in system_read("linux"):
             if os.path.exists(path):  # /lib64 and /opt are not everywhere
                 args += ["--ro-bind", path, path]
         args += ["--bind", str(self.workspace), str(self.workspace)]

@@ -105,13 +105,13 @@ def test_the_target_can_be_smaller_than_the_summary(tmp_path):
 
 
 def test_the_short_configuration_fits_under_its_ceiling(tmp_path):
-    """0.0.7g bought 8,000; 0.0.8's own prose costs about 1,200 tokens more.
+    """0.0.7g bought 8,000; 0.0.8's own prose costs about a thousand tokens more.
 
     The register geometry is 0.0.7g's to the character — this preset is still
     that *input* — and what moved is the fixed half: the frame discipline, the
-    optional destination, `lookup`, `resume`, and the sentence that makes the
-    registers reachable from the shell. 7.4 asks for that trade to be made
-    explicitly, which is what the number in the config is.
+    optional destination, `resume`, and the sentence that makes the registers
+    reachable from the shell. 7.4 asks for that trade to be made explicitly,
+    which is what the number in the config is.
     """
     agent = Agent(
         config=short_config(),
@@ -126,10 +126,10 @@ def test_the_short_configuration_fits_under_its_ceiling(tmp_path):
     # And the agent's own share of it is reported beside the total, because a
     # scaffold that grows its prose to buy the agent room should show both.
     assert agent.context["working_set_chars"] == 5 * 208 + 1536 + 704
-    # And it is a real scaffold, not a stub: seven tools, five special
+    # And it is a real scaffold, not a stub: six tools, five special
     # registers, a canvas, and room to land a call in every free register.
     assert [t["name"] for t in agent.tools.specs()] == [
-        "bash", "load", "set", "set_target", "lookup", "spawn", "resume",
+        "bash", "load", "set", "set_target", "spawn", "resume",
     ]
     assert agent.config.canvas_id == 10
     canvas = agent.registers.limit(agent.config.canvas_id)
@@ -146,7 +146,7 @@ def test_the_short_preset_is_only_a_geometry():
     for field in (
         "model", "effort", "thinking", "num_special_registers", "register_layout",
         "summary", "summary_model", "summary_effort", "max_depth", "spawn_workers",
-        "charge_children", "registers_as_files", "lookup", "run_checks",
+        "charge_children", "registers_as_files", "run_checks",
         "step_retry_seconds", "api_max_retries", "firewall",
     ):
         assert getattr(short, field) == getattr(full, field), field

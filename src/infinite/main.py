@@ -145,8 +145,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "0.0.8: 0.0.7i's input with a 4096-char canvas, a structured brief for "
             "`spawn` whose `check` the scaffold runs at the pop, a child's steps charged "
-            "to its parent, no depth ceiling, optional destination registers, `lookup`, "
-            "and the registers reachable from the shell."
+            "to its parent, no depth ceiling, optional destination registers, and the "
+            "registers reachable from the shell."
         ),
     )
     parser.add_argument(
@@ -169,11 +169,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--write",
         metavar="PATH",
         help="Where the work goes. Also carried in the system message.",
-    )
-    parser.add_argument(
-        "--no-lookup",
-        action="store_true",
-        help="Drop the `lookup` tool and the memo table (0.0.8's 7.1), for a comparison.",
     )
     parser.add_argument(
         "--no-shell-registers",
@@ -276,8 +271,6 @@ def collect_overrides(args) -> dict:
         overrides["summary"] = False
     if args.no_firewall:
         overrides["firewall"] = False
-    if args.no_lookup:
-        overrides["lookup"] = False
     if args.no_shell_registers:
         overrides["registers_as_files"] = False
     if args.no_charge:

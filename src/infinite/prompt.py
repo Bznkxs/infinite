@@ -142,8 +142,10 @@ def build_system_message(
         else ""
     )
     memo_line = (
-        f"\n`lookup` costs a line, not a page. <{facts_file}> is this run's memo table: "
-        "`grep` it before you go looking, append a line for what an index cannot know.\n"
+        f"\n<{facts_file}> is this run's memo table, shared by every agent in it: one "
+        "resolved fact a line, appended as you resolve it. `grep` it before you go "
+        "looking — a fact another frame already paid for is a fact you should not pay "
+        "for twice.\n"
         if facts_file
         else ""
     )

@@ -25,7 +25,7 @@ FACTS_FILE = "facts.md"
 FACTS_HEADER = (
     "# facts\n"
     "# One resolved fact per line, appended as it is resolved. `grep` before you go\n"
-    "# looking. `lookup` writes what an index can know; add what it cannot.\n"
+    "# looking; a fact another agent paid for is one you should not pay for twice.\n"
 )
 
 #: Where the registers appear as files, inside the agent's own scratch directory
@@ -57,6 +57,15 @@ class Workspace:
         self._spent = 0
         self._agents: set[str] = set()
         self._facts_lock = threading.Lock()
+        #: Created empty-but-for-its-header, because the system message names it
+        #: every step. Until 0.0.8d nothing but `lookup` ever wrote it, so in
+        #: every run that did not call `lookup` the file did not exist while the
+        #: agent was being told it was the run's memo table — and three runs
+        #: opened by `cat`ing it and getting nothing. A header is the difference
+        #: between an empty table and a missing one.
+        facts = self.facts_path()
+        if not facts.exists():
+            facts.write_text(FACTS_HEADER, encoding="utf-8")
 
     def record_step(self, agent_id: str) -> None:
         with self._output_lock:

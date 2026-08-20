@@ -2,15 +2,14 @@
  "task": "replace the infinite_agent/step_loop.py stub; the module calls into six siblings",
  "workspace_recipe": "runs/reconstruct_infinite_0.0.7i: nine written modules + a 99-line stub",
  "budget": "--max-steps 80, charged across the whole subtree",
- "note": "one run per arm; see docs/InfiniteAgent 0.0.8.md \u00a78 for the caveats",
+ "note": "one run per arm; see docs/InfiniteAgent 0.0.8.md §8 for the caveats",
  "arms": [
   {
    "arm": "A",
    "workspace": "runs/steploop_0.0.8",
    "variable": "unbounded depth",
    "heartbeat": false,
-   "check": "cd /Users/yufengdu/Documents/infinite/runs/steploop_0.0.8 && python3 -c 'import infinite_agent.step_loop' && ! grep -q NotImplementedError infinite_agent/step_loop.py",
-   "input_tokens": 8050,
+   "check": "python3 -c 'import infinite_agent.step_loop'",
    "root_steps": 56,
    "cost": 80,
    "passed": true,
@@ -76,7 +75,11 @@
      ]
     }
    ],
-   "wrote_implementation": true
+   "wrote_implementation": true,
+   "check_as_published": "cd /Users/yufengdu/Documents/infinite/runs/steploop_0.0.8 && python3 -c 'import infinite_agent.step_loop' && ! grep -q NotImplementedError infinite_agent/step_loop.py",
+   "check_note": "arm-level `check` was wrong until 2026-08-19: it held the compound string the ROOT authored for its child, not the root's own check. The root ran `import` alone. Kept as `check_as_published` because docs/InfiniteAgent 0.0.8.md §8 discusses the error.",
+   "input_tokens_estimated": 8050,
+   "max_request_tokens": 8233
   },
   {
    "arm": "B",
@@ -84,7 +87,6 @@
    "variable": "--max-depth 1",
    "heartbeat": false,
    "check": "python3 -c 'import infinite_agent.step_loop'",
-   "input_tokens": 8300,
    "root_steps": 80,
    "cost": 80,
    "passed": false,
@@ -120,7 +122,9 @@
      ]
     }
    ],
-   "wrote_implementation": true
+   "wrote_implementation": true,
+   "input_tokens_estimated": 8300,
+   "max_request_tokens": 8617
   },
   {
    "arm": "C",
@@ -128,7 +132,6 @@
    "variable": "live check",
    "heartbeat": true,
    "check": "python3 -c 'import infinite_agent.step_loop' && ! grep -q NotImplementedError infinite_agent/step_loop.py",
-   "input_tokens": 8300,
    "root_steps": 80,
    "cost": 80,
    "passed": false,
@@ -165,7 +168,9 @@
      ]
     }
    ],
-   "wrote_implementation": false
+   "wrote_implementation": false,
+   "input_tokens_estimated": 8300,
+   "max_request_tokens": 8592
   },
   {
    "arm": "D",
@@ -173,7 +178,6 @@
    "variable": "canvas 12288 (7.6's bisection)",
    "heartbeat": true,
    "check": "python3 -c 'import infinite_agent.step_loop' && ! grep -q NotImplementedError infinite_agent/step_loop.py",
-   "input_tokens": 11380,
    "root_steps": 80,
    "cost": 80,
    "passed": false,
@@ -209,7 +213,9 @@
      ]
     }
    ],
-   "wrote_implementation": false
+   "wrote_implementation": false,
+   "input_tokens_estimated": 11380,
+   "max_request_tokens": 11273
   },
   {
    "arm": "E",
@@ -217,7 +223,6 @@
    "variable": "live check, A's check string",
    "heartbeat": true,
    "check": "python3 -c 'import infinite_agent.step_loop'",
-   "input_tokens": 8220,
    "root_steps": 50,
    "cost": 77,
    "passed": true,
@@ -283,14 +288,15 @@
      ]
     }
    ],
-   "wrote_implementation": true
+   "wrote_implementation": true,
+   "input_tokens_estimated": 8220,
+   "max_request_tokens": 8419
   }
  ],
  "reference": [
   {
    "workspace": "runs/steploop_control",
    "label": "0.0.7f geometry, the attempt that passed",
-   "input_tokens": 22460,
    "steps": 82,
    "agents": [
     {
@@ -318,7 +324,7 @@
      "shell_register_refs": 0,
      "check": null,
      "goal": [
-      "Working dir /Users/yufengdu/Documents/infinite/runs/steploop_control. Read docs/RECON_NOTES.md \u2014 the whole of section 8 (\"Part 7.1 verbatim skeleton\" around line 779-826 and \"Part 7.6 0.0.7f \u2014 Iteration f: the clock\" around line 824-950) plus anything elsewhere in that file about: response validation, the step loop order of operations, timing fields, retries (step_retry_seconds / step_retry_backoff / step_retry_backoff_max / api_max_retries), recursion/spawn depth, cleanup, and cut-off handling. Use grep to find those topics anywhere in the file.",
+      "Working dir /Users/yufengdu/Documents/infinite/runs/steploop_control. Read docs/RECON_NOTES.md — the whole of section 8 (\"Part 7.1 verbatim skeleton\" around line 779-826 and \"Part 7.6 0.0.7f — Iteration f: the clock\" around line 824-950) plus anything elsewhere in that file about: response validation, the step loop order of operations, timing fields, retries (step_retry_seconds / step_retry_backoff / step_retry_backoff_max / api_max_retries), recursion/spawn depth, cleanup, and cut-off handling. Use grep to find those topics anywhere in the file.",
       ""
      ]
     },
@@ -351,9 +357,15 @@
       ""
      ]
     }
-   ]
+   ],
+   "input_tokens_estimated": 22460,
+   "max_request_tokens": 23251
   }
  ],
  "stub_lines": 99,
- "reading_module_imports": "`module_imports` is true for C and D at 99 lines because arm C renamed one import in the stub at step 78; the stub still raises NotImplementedError. `wrote_implementation` is the field to read."
+ "reading_module_imports": "`module_imports` is true for C and D at 99 lines because arm C renamed one import in the stub at step 78; the stub still raises NotImplementedError. `wrote_implementation` is the field to read.",
+ "heartbeat_note": "arms A and B predate the live-check commit: their recorded config has no `check_every_step`/`check_live_seconds` key. Register geometry is identical to C/E, so A-vs-E is a build difference as well as a flag difference.",
+ "token_note": "`input_tokens_estimated` is max_request_chars/2.6, which is what the write-up originally published. `max_request_tokens` is the largest request the run actually made, summed from input_tokens + cache_creation + cache_read in each trajectory's `usage` records.",
+ "transit_note": "retyped_chars is 0 for every agent in every arm: 300,423 generated argument characters across the six 0.0.8 step_loop runs, none of them a value already in a register. shell_register_refs total 19.",
+ "facts_note": "facts.md is written only by `lookup` (tools.py -> Workspace.remember). It reached 133 and 141 lines in arms C and E, and does not exist in A, B, D or the diagnostic run, where `lookup` was never called."
 }

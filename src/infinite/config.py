@@ -187,16 +187,6 @@ class Config:
     #: passing through a generation. False is 0.0.7's behaviour, for measuring
     #: what transit actually costs.
     registers_as_files: bool = True
-    #: 7.1: `lookup(symbol)` over an index the scaffold maintains, so forty
-    #: facts cost forty lines rather than forty pages.
-    lookup: bool = True
-    #: How many index lines one `lookup` may return for a symbol.
-    lookup_max_matches: int = 24
-    #: And for a whole file, which is a surface rather than a fact. The canvas
-    #: is 4,096 chars at the 0.0.8 geometry and a signature line runs to about
-    #: sixty, so this is roughly what one register can hold whole — which is the
-    #: condition 0.0.8a §5 gives for committing against a working set.
-    lookup_max_outline: int = 64
     #: 0.0.8c §3: the scaffold runs a child's `check` command when the child
     #: writes its response, and a response that fails it is refused. False
     #: makes `check` advisory, for measuring what enforcing it buys.
@@ -216,6 +206,16 @@ class Config:
     #: heartbeat, and the scaffold should notice which one it was given rather
     #: than making the operator declare it.
     check_live_seconds: float = 15.0
+    #: 0.0.8d §4.1. How many steps in a row may change nothing durable before
+    #: the dump says so; None to never say. Every step's progress is recorded in
+    #: the trajectory either way — this knob is only about telling the agent.
+    #:
+    #: 3 because that is where the five 0.0.8 arms separate: every frame that
+    #: shipped a working module stalled at most four steps in a row and hit
+    #: three twice at most, while every frame that shipped nothing ran to six,
+    #: eight and nine. At 3 the line is rare in a healthy run and loud in a
+    #: livelock, which is the sensitivity a notice wants.
+    stall_notice: int | None = 3
 
     # Firewall: writes are always confined to the workspace; these are the
     # extra directories the agent may *read*. Empty means workspace-only.
@@ -376,10 +376,6 @@ class Config:
             raise ValueError("spawn_workers must be at least 1")
         if self.max_depth is not None and self.max_depth < 0:
             raise ValueError("max_depth must not be negative, or None for no ceiling")
-        if self.lookup_max_matches < 1:
-            raise ValueError("lookup_max_matches must be at least 1")
-        if self.lookup_max_outline < 1:
-            raise ValueError("lookup_max_outline must be at least 1")
         if self.check_timeout <= 0:
             raise ValueError("check_timeout must be positive")
         if self.check_live_seconds <= 0:
@@ -435,8 +431,8 @@ SHORT = dict(
     summary_target_chars=600,
     summary_max_tokens=640,
     #: 8,000 at 0.0.7g. 0.0.8's prose is what moved it: the frame discipline,
-    #: the optional destination, `lookup`, `resume`, and the registers-as-files
-    #: sentence come to about 1,200 tokens of fixed constant that 0.0.7g did not
+    #: the optional destination, `resume`, and the registers-as-files sentence
+    #: come to about a thousand tokens of fixed constant that 0.0.7g did not
     #: pay. The register geometry is unchanged to the character, so this preset
     #: is still 0.0.7g's *input*; what it is not any more is 0.0.7g's price.
     max_context_tokens=9500,

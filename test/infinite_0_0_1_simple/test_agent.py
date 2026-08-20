@@ -316,7 +316,7 @@ def test_an_agent_at_the_depth_floor_is_not_offered_spawn(tmp_path):
     agent.run()
 
     assert [t["name"] for t in agent.tools.specs()] == [
-        "bash", "load", "set", "set_target", "lookup",
+        "bash", "load", "set", "set_target",
     ]
     error = agent.trajectory.read()[1]["observation"]["results"][0]["error"]
     # 0.0.8c §6: the refusal names whose allowance ran out, not a constant the

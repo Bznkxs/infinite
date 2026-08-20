@@ -44,11 +44,11 @@ model operation should be precise at one frame and lossy above it, and
 [`0.0.8c`](docs/InfiniteAgent%200.0.8c.md) makes `spawn` behave like the frame it
 already was. `--frame` is the configuration that carries all of it. **What it
 did** ([`0.0.8`](docs/InfiniteAgent%200.0.8.md)): the module with six-way fan-out
-that defeated 0.0.7 four times was implemented and imported in 56 steps at 8,053
-tokens of input, where the 0.0.7 attempt that managed it at all needed 22,460;
-the reading results did not move (six of six, four of them faster); and three of
-five attempts at that module wrote a complete implementation against 0.0.7's
-none-of-two. The axis the letters set out to fix is *not* fixed — what decides
+that defeated 0.0.7 four times was implemented and imported in 56 steps with a
+largest request of 8,233 tokens, where the 0.0.7 attempt that managed it at all
+peaked at 23,251; the reading results did not move (six of six, four of them
+faster); and three of five attempts at that module wrote a complete
+implementation against 0.0.7's none-of-four. The axis the letters set out to fix is *not* fixed — what decides
 the task is when a run starts writing, and nothing here makes it start sooner —
 so [`Iterating to 0.0.8d`](docs/Iterating%20to%200.0.8d.md) is where the series
 goes next.
@@ -89,7 +89,7 @@ the tools.
     normal register, smaller than the canvas. 3 and 4 truncate; `set_target`
     rejects.
 - **Tools** — `bash(command)`, `load(path, start)`, `set(value, register_id)`,
-  `set_target(content)`, `lookup(symbol)`, `spawn(goal, check, return_schema, …)`
+  `set_target(content)`, `spawn(goal, check, return_schema, …)`
   and `resume(agent_id, max_steps)`. All but `set` and `set_target` take an
   **optional** `register_id` for their return information, truncated to fit; the
   full version is in the trajectory (and, for `bash` and the two recursion
@@ -108,14 +108,16 @@ the tools.
   way back. It lives in the agent's own scratch directory, so neither an `ls` of
   the work nor the agent's own `rm` reaches it
   ([`0.0.8a`](docs/InfiniteAgent%200.0.8a.md)).
-- **`lookup` and the memo table** — `lookup(symbol)` answers with one line per
-  definition, out of an AST index the scaffold keeps over the workspace's Python
-  and reparses per changed file. Given a path or a dotted module name it returns
-  the whole surface of that module instead, which is what a caller actually
-  needs to call into one. What it resolves is appended to `facts.md`, the run's
-  memo table, shared by every agent in the workspace and queried with `grep` —
-  the artefact five runs kept reaching for as a prose digest, in the form the
-  work wants.
+- **The memo table** — `facts.md`, one resolved fact a line, shared by every
+  agent in the workspace, written with `>>` and queried with `grep`: the
+  artefact five runs kept reaching for as a prose digest, in the form the work
+  wants. It exists from the moment the workspace does, header and all, because
+  the system message names it every step. 0.0.8 filled it from a `lookup(symbol)`
+  tool backed by an AST index; **0.0.8d removed that tool** — the index only
+  parsed Python, which made the one primitive meant to turn width into depth a
+  special case for one language, and `grep` is language-agnostic and already in
+  the agent's hands. Ten calls across five runs, none of them in the two runs
+  that passed.
 - **Workspace** — at most `workspace_tokens` generated per step. Over that, the
   generation is cut off, saved to the trajectory, no tool calls run, and
   register 1 flips to `True`.
@@ -129,12 +131,15 @@ the tools.
   accounting for the whole series lives. Since 0.0.8 the budget also reports
   `working_set_chars`: the free registers, the canvas and the target — what the
   *agent* controls, as against what the request costs. At 0.0.7g that was 3,280
-  characters of a 7,453-token request; `--frame` makes it 5,840 of ~16,400.
+  characters of a 7,453-token request; `--frame` makes it 5,840. (`--frame`'s
+  surrounding total is ~16,700 tokens at 2.6 chars/token, or 16,639 as
+  `Config.context_tokens` reports it at four; compare the character counts.)
 - **Two budgets** — the input geometry and the output cap are separate
   resources. Reading is bounded by paging and is indifferent to the cap; writing
   tracks it almost exactly (9.5 lines of code a step at 16,384 tokens, 1.3 at
-  1,920). `--wide-output` keeps `--short`'s 6,063-token input and gives the
-  generation 8,192 ([`0.0.7i`](docs/InfiniteAgent%200.0.7i.md)).
+  1,920). `--wide-output` keeps `--short`'s input geometry and gives the
+  generation 8,192 ([`0.0.7i`](docs/InfiniteAgent%200.0.7i.md)); in practice its
+  agents' largest requests came to about 5,400 tokens.
 - **What the run has spent** — the `[Step]` line opens with the agent's depth,
   says how much of its budget went to children, and once a run has more than one
   agent adds `this run has spent N steps across M agents`

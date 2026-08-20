@@ -36,8 +36,8 @@ from .config import (
     Config,
 )
 from .firewall import Firewall
-from .index import SymbolIndex
 from .model import Model
+from .progress import Progress, stall_line
 from .prompt import build_system_message
 from .regfile import RegisterShell
 from .registers import RegisterFile
@@ -282,6 +282,10 @@ class Agent:
         self._check_step = -1
         #: Set when the check turned out to be too slow to be a heartbeat.
         self._check_is_slow = False
+        #: 0.0.8d §4.1: what each step left behind, and how long the current run
+        #: of steps that left nothing is. Built here rather than in `run` so the
+        #: first step is measured against the workspace as it was handed over.
+        self.progress = Progress(workspace.root)
         #: Steps already on record; a fresh run starts at 0.
         self.step = resume_from
         #: Where this segment began, so a budget and an allowance can be worked
@@ -353,9 +357,6 @@ class Agent:
             firewall=self.firewall,
             env=environment,
         )
-        #: 7.1's index, per agent because it caches parses and each agent has
-        #: its own thread.
-        self.index = SymbolIndex(workspace.root, display=workspace.display)
         self.tools = ToolBox(self)
         #: What one generation of this run can cost, at its fullest. Recorded in
         #: the trajectory and refused here if the config set a ceiling: the
@@ -403,11 +404,7 @@ class Agent:
             check=self.check if self.config.run_checks else None,
             goal=self.goal,
             write=self.write,
-            facts_file=(
-                self.workspace.display(self.workspace.facts_path())
-                if self.config.lookup
-                else None
-            ),
+            facts_file=self.workspace.display(self.workspace.facts_path()),
             reg_dir=(
                 f"${self.regshell.environment_variable}"
                 if self.regshell is not None
@@ -645,6 +642,9 @@ class Agent:
                             charged=self.charged,
                             depth=self.depth,
                             check=self._check_line,
+                            stall=stall_line(
+                                self.progress.streak, self.config.stall_notice
+                            ),
                         ),
                     }
                 ]
@@ -1046,6 +1046,7 @@ class Agent:
                 "segment_steps": segment_steps,
                 "charged": self.charged,
                 "cost": segment_steps + self.charged,
+                "progress": self.progress.summary(),
                 "registers": self.registers.snapshot(),
             }
         )
@@ -1087,6 +1088,11 @@ class Agent:
                     "summary": self.registers.values[SUMMARY_REGISTER],
                     "last_step": self.registers.values[STEP_REGISTER],
                     "check": self.check,
+                    # 0.0.8d §4.1: a parent deciding whether to resume this child
+                    # or re-brief it wants to know whether it was moving. A child
+                    # that ran out of steps having stalled nine in a row is not a
+                    # child to hand more steps to unchanged.
+                    "progress": self.progress.summary(),
                     # A child that died against a check its parent wrote wrongly
                     # has nothing to show for it unless the parent can see the
                     # check. The parent is the only one who can change it.
@@ -1259,7 +1265,15 @@ class Agent:
 
         The record waits for its summary so the trajectory keeps saying what it
         always said — one line per step, carrying the summary that followed it.
+
+        It is also where the step's progress is measured (0.0.8d §4.1) — after
+        the tools have run, after the check, and after the response was read, so
+        that everything the step could have left behind has landed.
         """
+        record["progress"] = self.progress.record(
+            target=self.registers.values[TARGET_REGISTER],
+            check=self._check_line,
+        )
         if not self.summarizes or last:
             # A run that is over does not need a summary handed to a step that
             # will never happen.
