@@ -203,19 +203,67 @@ the fact the other arms spent forty steps grepping six modules to find.
 
 ## 8. Results
 
-| arm | geometry | outcome |
+| arm | input | check | outcome |
+| --- | ---: | --- | --- |
+| **A** unbounded depth | 8,053 | import | **passed, 56 steps** (80 charged) |
+| **B** `--max-depth 1` | 8,304 | import | 457 lines on step 80, refused on one import |
+| **C** live check | 8,302 | import + no `NotImplementedError` | 80 steps, nothing written |
+| **D** canvas 12,288 (7.6) | 11,386 | import + no `NotImplementedError` | 80 steps, nothing written |
+
+Three things have to be said about that table before anything is read out of it.
+
+**It is one run per arm, on a task with enormous variance.** Two arms wrote a
+complete module and two wrote none; the same scaffold, the same task, the same
+budget. At 0.0.7's geometry the score was nothing written in two attempts of 150
+steps each, so 2-of-4 is a real move — but 2-of-4 is not a number to tune
+against.
+
+**A/B and C/D did not get the same check.** A and B were given
+`python3 -c 'import …'`; C and D were given that *and* `! grep -q
+NotImplementedError`, which the stub fails outright. That was an error in
+setting the experiment up, and it means arm C cannot be read as a measurement of
+the live check: two variables moved. A fifth arm, with the heartbeat and A's
+check exactly, is the clean comparison.
+
+**Arm D is the one result the confound does not spoil, and it is negative.**
+Tripling the canvas — 1,536 → 4,096 → 12,288, a working set of 14,032
+characters, an input of 11,386 tokens — produced no more code than 4,096 did.
+Whatever binds this task, 7.6's bisection says it is not the size of the one
+register a working set can land in. That is 0.0.8a §5's argument, and it does
+not survive its first test.
+
+What the arms have in common is where the steps went. C spent 80 steps and 33
+`load`s building fifteen scratch files of signatures; D spent 80 steps and 53
+writes doing the same into a bigger canvas; B spent 79 steps on it and then
+wrote the whole module in one generation. Only A interleaved. The failure is not
+that the facts do not fit — it is that the run does not start writing until it
+believes it has all of them, and nothing in 0.0.8 makes it start sooner.
+
+## 9. What is actually left, after the runs
+
+The letters attacked width from three directions and the runs say which of them
+moved.
+
+| | claim | verdict |
 | --- | --- | --- |
-| **A** unbounded depth | 8,053 in | **passed in 56 steps** (80 charged) |
-| **B** `--max-depth 1` | 8,304 in | wrote 457 lines on step 80; refused on one import |
-| **C** live check | 8,650 in | *(pending)* |
-| **D** canvas 12,288 (7.6's bisection) | 11,801 in | *(pending)* |
+| 8a §3 | values should move without a generation | works, and buys nothing: transit was 0% |
+| 8a §4 | a forced destination eats the working set | works, and is free |
+| 8a §5 | the canvas is what a working set must land in | **refuted by arm D** |
+| 8b §2 | precise at the frame, lossy above | the frame in the context fixed a real failure |
+| 8b §4 | a memo table, written by key | `facts.md` was read and never written |
+| 8c §2 | a brief should name, not describe | briefs came out well-formed every time |
+| 8c §3 | the check is what makes a lossy caller safe | true, and too late — hence 7.3 |
+| 8c §5 | a child's steps should be charged | works; bounded the depth-4 cascade |
+| 8c §6 | the scaffold should have no opinion on depth | the one run of it produced the cascade |
+| 7.1 | a signature should cost a line | five calls in five runs |
 
-One run per arm, so the arms are anecdotes and the pair A/B is not a
-measurement of depth. What the pair does say is that both single-root runs at
-~8k got within one import of a module 0.0.7 could not touch below 22k — which is
-a statement about the geometry, not about the ceiling.
+The honest summary is that 0.0.8 removed a set of *clerical* costs — a forced
+write, a re-typed value, an unbounded chain, a brief a parent could not author —
+and that the axis it set out to fix is unmoved by any of them. What decides the
+step_loop task is when the run starts writing, and every mechanism here is
+available to a run that never does.
 
-## 9. Open questions for 0.0.8d
+## 10. Open questions for 0.0.8d
 
 1. **Does depth want a price rather than freedom?** 0.0.8c §9.4 asked it and
    said the evidence for `max_depth = 1` was a real run. So is the evidence
@@ -229,5 +277,14 @@ a statement about the geometry, not about the ceiling.
 3. **What makes a memo table get written?** `facts.md` exists, is named in the
    system message, and was read repeatedly by an agent that never wrote to it.
    A table nobody writes is a table nobody can read.
-4. **Where is the canvas threshold?** 7.6's bisection is still not run: `--frame`
-   picks 4,096 on 0.0.8a §5's argument, not on evidence.
+4. **If not the canvas, what?** 7.6's bisection ran and came back negative:
+   12,288 characters of canvas wrote no more than 4,096 did. The remaining
+   candidates are that the binding quantity is the *whole* input rather than the
+   one wide register (0.0.7f succeeded at 22,460 and every 0.0.8 arm was under
+   12,000), or that it is not a context quantity at all.
+5. **How does a run get made to start writing?** Four of five arms spent between
+   half and all of their budget acquiring before producing a line, and the one
+   that passed is the one that interleaved. Charging prices delegation and
+   nothing prices deliberation. A budget that is visibly *for* producing —
+   rather than a step counter that treats a `grep` and a module as one step
+   each — may be the shape of it.
