@@ -134,13 +134,19 @@ def tool_specs(config: Config, *, spawn: bool = True) -> list[dict[str, Any]]:
                 "properties": {
                     "content": {
                         "type": "string",
-                        # The target's own limit, which is not the wide-register
-                        # limit when `max_target_length` splits them: at the
-                        # 0.0.8 geometry it is 704 against 1,536, and a model
-                        # told the wrong number writes to the wrong number and
-                        # has its write rejected whole.
+                        # Two numbers, and the aim is the one below. The limit
+                        # here is the target's own, which is not the
+                        # wide-register limit when `max_target_length` splits
+                        # them — 704 against 1,536 at the 0.0.8 geometry, and a
+                        # model told the wrong one has its write rejected whole.
+                        # And a model told only the ceiling writes to the
+                        # ceiling: two live runs lost three steps to a target
+                        # 40-550 chars over. This is 0.0.6's headroom, which
+                        # the summariser has had since then, applied here.
                         "description": (
-                            f"At most {config.register_limit(config.target_id)} chars."
+                            f"Aim for {config.target_budget} chars; over "
+                            f"{config.register_limit(config.target_id)} is refused whole "
+                            "and nothing changes."
                         ),
                     }
                 },

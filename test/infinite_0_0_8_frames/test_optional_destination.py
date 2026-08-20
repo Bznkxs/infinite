@@ -88,8 +88,13 @@ def test_the_target_is_advertised_at_its_own_length_not_the_wide_one(tmp_path):
         message = built.system_message()
         assert "2 holds 200, 4 holds 240" in message
         spec = next(s for s in built.tools.specs() if s["name"] == "set_target")
+        # Two numbers: what to aim for, and the ceiling a write is refused over.
+        # A model told only the ceiling writes to the ceiling — two live runs
+        # lost three steps to targets 40 to 550 characters over — so this is
+        # 0.0.6's headroom, which the summariser has had since then.
+        assert built.config.target_budget == 150
         assert spec["input_schema"]["properties"]["content"]["description"] == (
-            "At most 200 chars."
+            "Aim for 150 chars; over 200 is refused whole and nothing changes."
         )
     finally:
         built.bash.close()

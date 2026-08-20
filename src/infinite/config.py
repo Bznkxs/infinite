@@ -290,6 +290,17 @@ class Config:
             return self.max_special_length
         return self.max_register_length
 
+    @property
+    def target_budget(self) -> int:
+        """What `set_target` is asked for, kept under what register 2 holds.
+
+        The same headroom 0.0.6 gave the summariser, and for the same reason: a
+        model told a ceiling writes to the ceiling, and `set_target` rejects
+        rather than truncating, so every overshoot costs a whole step. Two live
+        0.0.8 runs lost three steps to targets 40 to 550 characters over.
+        """
+        return max(1, self.register_limit(TARGET_REGISTER) * 3 // 4)
+
     def summary_target(self, limit: int) -> int:
         """The budget the summariser is given, kept under the real limit.
 
