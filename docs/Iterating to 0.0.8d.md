@@ -62,7 +62,7 @@ eval/results/
 ```
 
 ```bash
-uv run pytest test                      # 301 tests, offline, ~18s, all pass
+uv run pytest test                      # 332 tests, offline, ~18s, all pass
 python -m eval.analyse runs/<workspace> # what a run actually did
 python -m eval.run babilong --config 1M --split qa2 -n 1 --profile frame
 python -m eval.run width -n 3 --profile frame            # the hard task, x3
@@ -142,9 +142,10 @@ two rulers — compare the character counts.
 | the width probe | 5 live runs of `step_loop.py`, 80 steps each | 3 wrote a module, 2 passed |
 | 7.6's canvas bisection | one run at canvas 12,288 | negative |
 | stall streaks (0.0.8d, §4.1) | proxy over the 7 frames of the 5 arms | separates pass from fail |
-| progress, the notice, the price | `test_progress.py` (23 tests) | pass |
+| progress, the notice, the price | `test_progress.py` (28 tests) | pass |
 | the probe as a harness | `test_width_probe.py`, synthetic corpus | pass |
-| the writing probe | `test_volume_probe.py` (25 tests) | built, never run |
+| the writing probe | `test_volume_probe.py` (27 tests) | built, never run |
+| the probe pipeline end to end | scripted model, live check, real grade, no API | pass |
 | every arm of every probe is a command the CLI accepts | `test_volume_probe.py` | pass |
 | §4.6's firewall hole | the suite, which is green | fixed |
 | transit, brief cost | read off trajectories | answered |
@@ -430,31 +431,36 @@ actually see change what it does, or is `grep`-before-you-look a habit no
 sentence installs? That is a re-run, not a design question — and it is now
 `test_memo_table.py` rather than a claim.
 
-### 4.6 One test fails, and it is about `python3` under the firewall
+### 4.6 `python3` under the firewall — **fixed**
 
 `test_scratch.py::test_an_agents_shell_puts_temporary_files_inside_the_workspace`
-fails deterministically: 270 of 271 pass. Neither the test nor `firewall.py` has
-changed since the baseline commit, so this is the environment moving, not 0.0.8.
+failed deterministically, and the cause mattered more than the test. Under
+`uv run`, `python3` resolves to `.venv/bin/python3` →
+`~/.local/share/uv/python/cpython-3.13.14-.../bin/python3.13`, and
+`SYSTEM_READ_DARWIN` did not list that path — so the sandboxed shell's
+interpreter could not read its own stdlib and died with `ModuleNotFoundError: No
+module named 'encodings'`. The probe swallows stderr, so the register landed
+empty and the assert fired.
 
-The cause matters more than the test. Under `uv run`, `python3` resolves to
-`.venv/bin/python3` → `~/.local/share/uv/python/cpython-3.13.14-.../bin/python3.13`,
-and `SYSTEM_READ_DARWIN` in `firewall.py` does not list that path — so the
-sandboxed shell's interpreter cannot read its own stdlib and dies with
-`ModuleNotFoundError: No module named 'encodings'`. The probe swallows stderr,
-so the register lands empty and the assert fires.
+That was a live-run hazard and not just a red test. Every `check` in the 0.0.8
+arms was a `python3 -c 'import …'`, and they worked only because those runs
+resolved `python3` to `/usr/bin/python3`, whose real prefix is under
+`/Applications`, which *is* allowed. An agent reaching for the project's own
+interpreter got `Operation not permitted` and no explanation.
 
-This is a live-run hazard, not just a red test. Every `check` in the 0.0.8 arms
-was a `python3 -c 'import …'`, and they worked only because those runs resolved
-`python3` to `/usr/bin/python3` (whose real prefix is under `/Applications`,
-which *is* allowed). An agent that reaches for the project's own interpreter gets
-`Operation not permitted` and no explanation. The fix is to add the running
-interpreter's `sys.base_prefix` to the readable set, which is also what makes
-the test environment-independent.
+`firewall.system_read()` now adds the running interpreter's `sys.base_prefix` and
+`sys.prefix` to the readable roots, which is also what makes the test
+environment-independent rather than passing by luck. The suite has been green
+since. It is exercised where it actually failed, too: the writing probe's
+end-to-end test writes its output with a `python3` heredoc inside the sandbox.
 
-Relatedly and cosmetically: every check emits two
-`python3: error: couldn't create cache file '…/xcrun_db-…' (errno=Operation not
-permitted)` lines into its `tool_output`, and the `[Check]` dump line has an
-unbalanced opening parenthesis.
+The two cosmetic notes that hung off this are closed as well. The
+`python3: error: couldn't create cache file '…/xcrun_db-…'` pair no longer
+appears — a check's output is now empty on success, where it used to carry two
+lines of sandbox noise into a register. And a `[Check]` line that has to be cut
+says `[…]` rather than ending mid-path, which is where the unbalanced `(` came
+from: it is the one line the agent reads every step, and a shortened error should
+not read as a corrupt one.
 
 ### 4.7 Two Design Tests have no evidence at all
 

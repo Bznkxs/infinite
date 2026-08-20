@@ -60,6 +60,10 @@ NO_TOOL_CALL_NOTICE = (
 )
 NO_ACTION = "(no tool call)"
 CUT_OFF_ACTION = "(generation cut off before a tool call could run; nothing took effect)"
+#: How much of a failing check's last line the dump carries. It is paid for on
+#: every step that follows, and the whole output is in the result file.
+CHECK_LINE_CHARS = 160
+
 #: Register 0 is a normal register — 224 chars in the short geometry — so this
 #: has to survive its own limit, the way 0.0.7b's truncation notice does.
 CUT_OFF_NOTICE = (
@@ -1222,6 +1226,11 @@ class Agent:
         )
         display = self.workspace.display(path)
         first = next((line for line in output.strip().splitlines()[::-1] if line.strip()), "")
+        # Marked when it is cut, because an error cut mid-path reads as corrupt
+        # rather than as truncated — an unbalanced `(` in the one line the agent
+        # is shown every step. The whole of it is in the result file either way.
+        if len(first) > CHECK_LINE_CHARS:
+            first = first[:CHECK_LINE_CHARS].rstrip() + " […]"
         self._last_check = self._check_result = {
             "command": self.check,
             "exit_code": code,
@@ -1233,7 +1242,7 @@ class Agent:
         self._check_line = (
             "passes."
             if code == 0
-            else f"FAILS (exit {code}): {first[:160]} — {display}"
+            else f"FAILS (exit {code}): {first} — {display}"
         )
         logger.info(
             "agent %s step %d: check %s",

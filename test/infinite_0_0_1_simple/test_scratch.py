@@ -140,3 +140,37 @@ def test_the_session_inherits_this_process_environment_when_none_is_given(tmp_pa
         assert session.execute_command("echo $PATH").strip() == os.environ["PATH"]
     finally:
         session.close()
+
+
+def test_a_check_line_that_is_cut_says_so(tmp_path):
+    """It is the one line the agent reads every step, and an error truncated
+    mid-path reads as corrupt rather than as shortened — an unbalanced `(`.
+    """
+    from infinite.agent import CHECK_LINE_CHARS, Agent
+    from infinite.config import frame_config
+    from infinite.workspace import Workspace
+    from .fake_model import FakeModel
+
+    root = tmp_path / "w"
+    root.mkdir()
+    long_name = "a_module_name_that_is_quite_deliberately_far_too_long" * 4
+    (root / "m.py").write_text(f"from {long_name} import thing\n")
+    agent = Agent(
+        config=frame_config(summary=False),
+        workspace=Workspace(root),
+        model=FakeModel([]),
+        instruction="x",
+        check="python3 -c 'import sys; sys.path.insert(0, \".\"); import m'",
+    )
+    agent.step = 1
+    try:
+        agent._run_check_now()
+    finally:
+        agent.bash.close()
+
+    line = agent._check_line
+    assert line.startswith("FAILS (exit 1): ")
+    assert "[…]" in line
+    # And it is still one line, bounded by the constant that pays for it.
+    assert len(line.splitlines()) == 1
+    assert line.count("[…]") == 1

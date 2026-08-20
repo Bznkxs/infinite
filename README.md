@@ -145,6 +145,21 @@ the tools.
   agent adds `this run has spent N steps across M agents`
   ([`0.0.7j`](docs/InfiniteAgent%200.0.7j.md) made the price visible;
   [`0.0.8c`](docs/InfiniteAgent%200.0.8c.md) made it charged).
+- **Progress, and the price of not making any** — every step records what
+  durable state it changed: a file in the workspace, the target register, the
+  memo table, the check's verdict. Everything else a step makes, the next step
+  overwrites. A step that changed none of it is a *stall*, which is not a defect
+  — reading four files in one step to decide is a stall and the scaffold asks for
+  it — but stalls in a row are a livelock, and a run that loops fails at eighty
+  steps and would fail at eight hundred. So from the third in a row the `[Step]`
+  line says where the budget went, a `[Stall]` line says what has not happened,
+  and each further one costs a step of budget on top of itself. A price and not a
+  ceiling, for the reason `max_depth` is gone: the scaffold has an opinion about
+  the resource, not about the shape of the work. On the five runs of the hard
+  task this was the only measure that separated the frames that shipped a module
+  from the frames that did not — every one that passed stalled at most four steps
+  in a row, every one that failed ran to six, eight, nine
+  ([`0.0.8d`](docs/Iterating%20to%200.0.8d.md) §4.1).
 - **The invariant** — four sentences of system message, because a recommendation
   about how to work is a sentence and not a tool: hold one goal at a time and be
   precise about it, lossy about why you are here, and hold nothing about what is
@@ -314,10 +329,26 @@ At **7,802 tokens for a whole generation** it answers 18 of 18 reading questions
 over corpora from 245KB to **39.4MB**, and fixes a real flask bug graded by
 held-out tests. See [`docs/Evaluation.md`](docs/Evaluation.md).
 
+Two probes in `eval/benchmarks/` are the project's own rather than a public
+dataset, because the Infinite Context Test asks for two things no benchmark
+measures. `width` is the task the whole series turns on — implement one module
+that calls into nine siblings — and `volume` is *infinite writing*: turn a corpus
+of records into a card each, run it twice at ten times the size, and the claim is
+not that either run succeeds but that the largest request does not move between
+the two rows while the output does. `volume` generates its corpus from a seed, so
+it needs no network and works on a fresh clone.
+
 ```bash
 uv run python -m eval.run babilong --config 10M --split qa2 -n 1 --profile short
+uv run python -m eval.run volume --config 120  --profile frame
+uv run python -m eval.run volume --config 1200 --profile frame   # ten times as much
+uv run python -m eval.run width -n 3 --profile frame             # the hard task
+uv run python -m eval.run width -n 3 --profile frame --arm no-stall-charge
 uv run python -m eval.run --report
 ```
+
+`--arm` is one named variable off the baseline, because the one thing that has
+repeatedly cost a comparison here is an arm that changed two things at once.
 
 ## Reading a run
 
