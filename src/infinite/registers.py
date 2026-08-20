@@ -97,6 +97,7 @@ class RegisterFile:
         run: tuple[int, int] | None = None,
         charged: int = 0,
         depth: int | None = None,
+        check: str | None = None,
     ) -> str:
         """The register dump that makes up the model's context each step.
 
@@ -117,6 +118,12 @@ class RegisterFile:
         `depth` is 0.0.8c §6. The scaffold no longer has an opinion about how
         deep a tree should go, and an agent that is to have one needs to be able
         to see where it is standing.
+
+        `check` is the acceptance test's current verdict, run by the scaffold
+        after every step. It is one line, it is the machine rather than the
+        agent's recollection, and it is the thing 7.3 says should replace
+        acquiring an interface: a run that is told every step whether its work
+        imports does not have to read six modules to find out.
         """
         lines = []
         if step is not None or depth is not None:
@@ -136,6 +143,8 @@ class RegisterFile:
             if run and run[1] > 1:
                 spent += f"; this run has spent {run[0]} steps across {run[1]} agents"
             lines.append(f"[Step] {spent}")
+        if check:
+            lines.append(f"[Check] {check}")
         lines.append("[Registers]")
         for i, value in enumerate(self.values):
             # The name comes first: with five special registers, "register 3"

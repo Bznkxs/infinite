@@ -203,6 +203,19 @@ class Config:
     run_checks: bool = True
     #: Seconds a `check` command may take before it is called failed.
     check_timeout: float = 300.0
+    #: Run the check after every step, not only when a response lands, and put
+    #: its verdict at the top of the dump. 7.3's "verify instead of read" made
+    #: structural rather than advisory: a machine check is unbounded and free of
+    #: width (0.0.8b §1), so the cheapest way to learn an interface is to be
+    #: told, every step, whether the thing you are building imports. Two 0.0.8
+    #: runs spent forty-odd steps acquiring signatures and wrote nothing, with
+    #: an `import` check sitting unused until the end.
+    check_every_step: bool = True
+    #: A check slower than this stops being run every step — it is still run
+    #: when a response lands. A test suite is a fine acceptance test and a poor
+    #: heartbeat, and the scaffold should notice which one it was given rather
+    #: than making the operator declare it.
+    check_live_seconds: float = 15.0
 
     # Firewall: writes are always confined to the workspace; these are the
     # extra directories the agent may *read*. Empty means workspace-only.
@@ -369,6 +382,8 @@ class Config:
             raise ValueError("lookup_max_outline must be at least 1")
         if self.check_timeout <= 0:
             raise ValueError("check_timeout must be positive")
+        if self.check_live_seconds <= 0:
+            raise ValueError("check_live_seconds must be positive")
         if self.max_context_tokens is not None:
             if self.max_context_tokens < 1:
                 raise ValueError("max_context_tokens must be at least 1, or None")

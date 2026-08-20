@@ -297,3 +297,71 @@ def test_the_goal_survives_a_resume(tmp_path):
         assert "[Goal]\nhold this" in again.system_message()
     finally:
         again.bash.close()
+
+
+# --- the check as a live signal ------------------------------------------
+def test_the_verdict_is_at_the_top_of_every_dump(tmp_path):
+    """7.3 made structural: verify instead of read, every step.
+
+    Two 0.0.8 runs spent forty-odd steps acquiring signatures for a module that
+    calls into six others and wrote nothing, with an `import` check sitting
+    unused until a response landed. A check is a machine operation and free of
+    width (0.0.8b §1), so the cheapest way to learn an interface is to be told
+    every step whether the work imports.
+    """
+    built = build_agent(tmp_path, max_steps=4)
+    built.check = "test -f built.txt"
+    built.model.script = [
+        step(tool_use("bash", command="echo thinking")),
+        step(tool_use("bash", command="touch built.txt")),
+        child_writes(built),
+    ]
+    result = built.run()
+
+    assert result.ok
+    dumps = [r["messages"][0]["content"] for r in built.model.requests]
+    assert "[Check]" not in dumps[0]          # nothing has run yet
+    assert "[Check] FAILS (exit 1)" in dumps[1]
+    assert "[Check] passes." in dumps[2]
+    # And it lands between the budget and the registers, where it is read.
+    assert dumps[2].index("[Step]") < dumps[2].index("[Check]") < dumps[2].index("[Registers]")
+
+
+def test_a_response_landing_in_a_step_reuses_that_step_s_verdict(tmp_path):
+    """The check runs after the tools; the response is read after that."""
+    built = build_agent(tmp_path, max_steps=3)
+    built.check = "true"
+    built.model.script = [child_writes(built)]
+    built.run()
+
+    checks = sorted((built.workspace.root / "tool_output").glob("*check*.json"))
+    assert len(checks) == 1  # not two for the one step
+
+
+def test_a_slow_check_stops_being_a_heartbeat_and_says_so(tmp_path):
+    built = build_agent(tmp_path, max_steps=3, check_live_seconds=0.05)
+    built.check = "sleep 0.2"
+    built.model.script = [
+        step(tool_use("bash", command="echo one")),
+        step(tool_use("bash", command="echo two")),
+        child_writes(built),
+    ]
+    built.run()
+
+    dumps = [r["messages"][0]["content"] for r in built.model.requests]
+    assert "too slow" in dumps[1] and "run it yourself" in dumps[1]
+    # It ran once as a heartbeat and once more only because a response landed.
+    checks = sorted((built.workspace.root / "tool_output").glob("*check*.json"))
+    assert len(checks) == 2
+
+
+def test_the_heartbeat_can_be_turned_off(tmp_path):
+    built = build_agent(tmp_path, max_steps=3, check_every_step=False)
+    built.check = "true"
+    built.model.script = [step(tool_use("bash", command="echo one")), child_writes(built)]
+    built.run()
+
+    dumps = [r["messages"][0]["content"] for r in built.model.requests]
+    assert all("[Check]" not in dump for dump in dumps)
+    checks = sorted((built.workspace.root / "tool_output").glob("*check*.json"))
+    assert len(checks) == 1  # only the one that judged the response

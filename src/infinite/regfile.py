@@ -77,7 +77,10 @@ class RegisterShell:
             data = value.encode("utf-8")
             self.path(i).write_bytes(data)
             self._written.append(data)
-            lines.append(f"export R{i}={shlex.quote(value)}")
+            # A shell variable cannot hold a NUL, and one in the loader would
+            # break the whole script — so every command after it, silently.
+            # The file keeps the value as it is; only `$Ri` is cleaned.
+            lines.append(f"export R{i}={shlex.quote(value.replace(chr(0), ''))}")
         self.loader.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def sync_in(self) -> list[str]:

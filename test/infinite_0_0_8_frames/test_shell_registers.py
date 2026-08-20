@@ -130,3 +130,15 @@ def test_the_scaffold_can_be_run_without_any_of_this(tmp_path):
         assert "$REGDIR" not in built.system_message()
     finally:
         built.bash.close()
+
+
+def test_a_nul_in_a_register_does_not_break_the_loader(agent):
+    """One bad byte in the script would silently break every later command."""
+    agent.registers.store(6, "before\x00after")
+    result = run(agent, "bash", command='printf "%s" "$R6" > "$REGDIR/7"; echo alive', register_id=8)
+
+    assert "alive" in agent.registers.values[8]
+    assert agent.registers.values[7] == "beforeafter"
+    # The file itself is untouched; only the exported variable is cleaned.
+    assert agent.regshell.path(6).read_bytes() == b"before\x00after"
+    assert result.status.startswith("tool_output/")

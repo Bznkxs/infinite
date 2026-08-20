@@ -276,6 +276,12 @@ class Agent:
         #: against a check has nothing to show for it unless the parent — the
         #: only one who can change the check — is told which one.
         self._check_result: dict[str, Any] | None = None
+        #: The verdict the next dump will carry, and the step it is from, so a
+        #: response landing in the same step reuses it rather than paying twice.
+        self._check_line: str | None = None
+        self._check_step = -1
+        #: Set when the check turned out to be too slow to be a heartbeat.
+        self._check_is_slow = False
         #: Steps already on record; a fresh run starts at 0.
         self.step = resume_from
         #: Where this segment began, so a budget and an allowance can be worked
@@ -638,6 +644,7 @@ class Agent:
                             run=self.workspace.spent(),
                             charged=self.charged,
                             depth=self.depth,
+                            check=self._check_line,
                         ),
                     }
                 ]
@@ -707,6 +714,10 @@ class Agent:
                     if results:
                         notice += CUT_OFF_PARTIAL.format(ran=len(results))
                     self.registers.store(RESULT_REGISTER, notice)
+                    self._observe_check()
+                    if self._last_check is not None:
+                        record["check"] = self._last_check
+                        self._last_check = None
                     record["timing"] = _timing(
                         started_at, clock, generated, flushed, ran, time.monotonic()
                     )
@@ -721,6 +732,10 @@ class Agent:
                 results = self._run_tools(calls)
                 if results:
                     record["observation"] = {"results": [r.record for r in results]}
+                # Before the response is read, so a response that lands in this
+                # step is judged by this step's verdict rather than paying for
+                # the same command twice.
+                self._observe_check()
                 ran = time.monotonic()
 
                 # Read the response before summarising: a run that is over does
@@ -1123,13 +1138,33 @@ class Agent:
                 return False, None, failure
         return True, value, None
 
-    def _check_failed(self) -> str | None:
-        """Run the acceptance test; on failure, what register 0 should say.
+    def _observe_check(self) -> None:
+        """Run the acceptance test after a step and keep its verdict for the dump.
 
-        The output goes to a file rather than into the register: at a small
-        geometry register 0 holds two hundred characters and a traceback is
-        thousands, and the thing to act on is the traceback.
+        7.3 asks for write-then-verify to replace acquiring an interface, and
+        0.0.8b §1 says why it is affordable: a check is a machine operation, so
+        it is unbounded and costs no width. What it needed to become a habit
+        rather than advice was to be *there* — one line at the top of every
+        dump, saying whether the work currently passes.
+
+        A check that takes longer than `check_live_seconds` stops being run this
+        way. A test suite is a fine acceptance test and a poor heartbeat, and
+        the scaffold can tell which one it was given by running it once.
         """
+        if not (self.check and self.config.run_checks and self.config.check_every_step):
+            return
+        if self._check_is_slow:
+            return
+        result = self._run_check_now()
+        if result["duration_s"] > self.config.check_live_seconds:
+            self._check_is_slow = True
+            self._check_line = (
+                f"{self._check_line} — too slow ({result['duration_s']:.0f}s) to run "
+                "every step, so this is the last time; run it yourself."
+            )
+
+    def _run_check_now(self) -> dict[str, Any]:
+        """One run of the check, recorded and turned into a line for the dump."""
         clock = time.monotonic()
         code, output = self.run_check(self.check)
         path = self.workspace.output_path(self.agent_id, self.step, "check")
@@ -1148,20 +1183,42 @@ class Agent:
             encoding="utf-8",
         )
         display = self.workspace.display(path)
+        first = next((line for line in output.strip().splitlines()[::-1] if line.strip()), "")
         self._last_check = self._check_result = {
             "command": self.check,
             "exit_code": code,
             "file": display,
             "duration_s": round(time.monotonic() - clock, 3),
         }
-        if code == 0:
-            logger.info("agent %s step %d: check passed", self.agent_id, self.step)
-            return None
-        logger.info(
-            "agent %s step %d: check failed (exit %d), response refused",
-            self.agent_id, self.step, code,
+        self._check_step = self.step
+        # One line, because it is paid for on every step that follows.
+        self._check_line = (
+            "passes."
+            if code == 0
+            else f"FAILS (exit {code}): {first[:160]} — {display}"
         )
-        first = next((line for line in output.strip().splitlines()[::-1] if line.strip()), "")
+        logger.info(
+            "agent %s step %d: check %s",
+            self.agent_id, self.step, "passed" if code == 0 else f"failed (exit {code})",
+        )
+        return self._last_check
+
+    def _check_failed(self) -> str | None:
+        """Whether a landed response is refused, and what register 0 should say.
+
+        Reuses this step's verdict when there is one: the check runs after the
+        tools and a response written by those tools is read afterwards, so the
+        two would otherwise pay for the same command twice.
+        """
+        result = (
+            self._last_check
+            if self._check_step == self.step and self._last_check is not None
+            else self._run_check_now()
+        )
+        code, display = result["exit_code"], result["file"]
+        if code == 0:
+            return None
+        first = self._check_line.split(": ", 1)[-1].split(" — ")[0] if self._check_line else ""
         # Both of these have to survive register 0, which is 208 chars at the
         # 0.0.8 geometry, so the path comes first and the prose is short. The
         # check itself is already in the system message and is not repeated.

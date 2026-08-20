@@ -194,6 +194,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not run a child's `check` at the pop; it becomes advice (0.0.8c §3).",
     )
     parser.add_argument(
+        "--no-live-check",
+        action="store_true",
+        help=(
+            "Run the check only when a response lands, not after every step. The "
+            "verdict then leaves the dump, and write-then-verify goes back to being "
+            "advice (7.3)."
+        ),
+    )
+    parser.add_argument(
         "--wide-output",
         action="store_true",
         help=(
@@ -275,6 +284,8 @@ def collect_overrides(args) -> dict:
         overrides["charge_children"] = False
     if args.no_checks:
         overrides["run_checks"] = False
+    if args.no_live_check:
+        overrides["check_every_step"] = False
     if args.allow_read:
         overrides["readable_dirs"] = tuple(args.allow_read)
     return overrides
