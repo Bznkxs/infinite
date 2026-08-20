@@ -42,6 +42,22 @@ the sentence that makes the registers reachable, and the frame discipline is
 four sentences. Against that, the space the agent controls grew 78%. Both
 numbers are now reported by `Config.context_tokens`, which is 7.4's actual ask.
 
+### The brief pays for its schema, and it is not close
+
+0.0.8c §9.1 asked for this to be measured the way 0.0.7g measured prose — fixed
+tokens before and after, against briefing tokens generated before and after —
+and it comes out one-sided.
+
+| | fixed cost | generated per spawn |
+| --- | ---: | ---: |
+| 0.0.7 `prompt` | 1,681 chars of schema | median 2,545 chars (n=34) |
+| 0.0.8 named brief | 1,690 chars of schema | median 545 chars (n=9) |
+
+The fields replaced a long `prompt` description almost exactly, so the schema is
+**nine characters** more expensive, and what a parent generates to brief a child
+fell by a factor of 4.7. The 42% growth in the fixed half above is `lookup`,
+`resume` and the frame prose; none of it is the brief.
+
 ## 3. Reading did not move, which is the prediction
 
 §8 said the reading results should not move, because nothing in 7.1-7.4 touches
@@ -295,20 +311,17 @@ before it had.
    spends its first steps learning where it is — and the scaffold charges zero
    for that. Whether the right answer is a frame surcharge, a reserve the parent
    must keep, or something that is not a constant at all is unanswered.
-2. **Does the structured brief pay for its schema?** (0.0.8c §9.1.) The fixed
-   half is measured above; the briefing tokens a parent *generates* are not yet
-   compared against 0.0.7's prose briefs.
-3. **What makes a memo table get written?** `facts.md` exists, is named in the
+2. **What makes a memo table get written?** `facts.md` exists, is named in the
    system message, and was read repeatedly by an agent that never wrote to it.
    A table nobody writes is a table nobody can read.
-4. **If not the canvas, what?** 7.6's bisection ran and came back negative:
+3. **If not the canvas, what?** 7.6's bisection ran and came back negative:
    12,288 characters of canvas wrote no more than 4,096 did. The remaining
    candidates are that the binding quantity is the *whole* input rather than the
    one wide register (0.0.7f succeeded at 22,460 and every 0.0.8 arm was under
    12,000), or that it is not a context quantity at all.
-5. **How does a run get made to start writing?** Four of five arms spent between
-   half and all of their budget acquiring before producing a line, and the one
-   that passed is the one that interleaved. Charging prices delegation and
+4. **How does a run get made to start writing?** Four of five arms spent between
+   half and all of their budget acquiring before producing a line, and the two
+   that passed are the two that interleaved. Charging prices delegation and
    nothing prices deliberation. A budget that is visibly *for* producing —
    rather than a step counter that treats a `grep` and a module as one step
    each — may be the shape of it.
