@@ -59,6 +59,7 @@ test/
   infinite_0_0_8_frames/   the 0.0.8 suite
 eval/results/
   steploop-0.0.8.json      the five probe arms, distilled (runs/ is gitignored)
+  volume-0.0.8d.json       the two infinite-writing rows, likewise
 ```
 
 ```bash
@@ -144,7 +145,8 @@ two rulers — compare the character counts.
 | stall streaks (0.0.8d, §4.1) | proxy over the 7 frames of the 5 arms | separates pass from fail |
 | progress, the notice, the price | `test_progress.py` (28 tests) | pass |
 | the probe as a harness | `test_width_probe.py`, synthetic corpus | pass |
-| the writing probe | `test_volume_probe.py` (27 tests) | built, never run |
+| the writing probe | `test_volume_probe.py` (27 tests) | pass |
+| infinite writing, live | `volume` at 120 and 1,200 records, `--profile frame` | **2/2, request flat** |
 | the probe pipeline end to end | scripted model, live check, real grade, no API | pass |
 | every arm of every probe is a command the CLI accepts | `test_volume_probe.py` | pass |
 | §4.6's firewall hole | the suite, which is green | fixed |
@@ -339,11 +341,42 @@ Three properties of the price are worth stating, because each was a decision:
   streak, in the handoff, which it can act on because it is the only frame that
   can change the brief.
 
-**None of tier 3 has been run live.** The threshold and the surcharge are fitted
-to seven frames from five runs, one per arm, on a proxy measure. That is enough
-to choose a default and not enough to believe it, so both have flags —
-`--no-stall-charge` keeps the measure and the notice and drops the price;
-`--no-stall-notice` drops both — and the two arms are in `eval/run.py`'s `ARMS`.
+**Two live runs, and they say three things.** The `volume` rows (§4.8) are the
+first runs under this mechanism, and they are worth more than the seven frames
+the threshold was fitted to, because they are the real measure rather than a
+proxy and they are a different task.
+
+*The measure works, and the failure it names is real.* The run stalled 17 of 25
+steps and ran a **twelve-step streak**, steps 6 to 17: it re-read its own
+instruction file at 7, 14 and 16, re-read the head of the corpus at 6, 7, 9, 15
+and 17, and re-counted its own output six times. Nothing was written for twelve
+steps. That is the pathology exactly — not reading, not writing late, but a frame
+going round without leaving anything behind — and the scaffold saw it as it
+happened.
+
+*A price and not a cap is the right instrument, and this run is why.* At step 18
+it rewrote its generator, regenerated the file, and finished with all 120 cards
+correct. Any ceiling low enough to catch that streak would have killed a run that
+recovered.
+
+*The threshold does not transfer, and the magnitude is aggressive.* A **passing**
+frame ran twelve, where the width arms said four was the passing maximum — so
+"longest streak separates pass from fail" is a fact about that task and not a
+law, and `config.py` says so where the number is set. The surcharge took **11 of
+the 40 budget units** on a run that was entirely correct, leaving four steps of
+margin. Whether that pressure is what got it out of the loop at step 18, or
+nearly killed a run that would have got out anyway, is one A/B —
+`--arm no-stall-charge` against the baseline — and it is the top of §5.
+
+Row 2 is the reassuring half of the same evidence: 1,200 records, longest streak
+3, **one** budget unit spent on stalling out of 300. A run that goes about its
+work never meets the mechanism. The whole cost fell on the run that spent twelve
+steps re-reading its own instruction file, which is the run it is for.
+
+The default stays on, on the project's own convention that a new mechanism ships
+with a flag rather than a decision. Both flags exist (`--no-stall-charge` keeps
+the measure and the notice; `--no-stall-notice` drops both) and both arms are in
+`eval/run.py`.
 
 ### 4.2 The canvas is not the binding constraint
 
@@ -483,10 +516,10 @@ close.
 | --- | --- | --- | --- |
 | **fixed context** — does not *grow* with the task | `test_fixed_context.py`, four axes; live, five agents at five depths spanned 1,389 tokens | — | **held** |
 | **infinite reading** | `test_the_request_does_not_grow_with_the_size_of_what_is_read`, 4KB to 4MB | 6/6 under `--frame`; a 10M-token BABILong instance in nine steps | **held** |
-| **infinite writing** | `test_the_request_does_not_grow_with_the_size_of_what_is_written`, 10,000 lines | a probe exists as of 0.0.8d and has not been run | **half** |
+| **infinite writing** | `test_the_request_does_not_grow_with_the_size_of_what_is_written`, 10,000 lines | two rows, both 100% correct: **ten times the output and the largest request fell 5.1%** | **held** |
 | **infinite complexity** | more steps do not grow the request | 2 of 5 arms, n=1 per arm, on the one task | **open** |
 
-Two things follow, and they are the whole of what is left.
+One clause left, and one thing follows about it.
 
 **The scaffold half is done and it is the easy half.** Every one of those
 scaffold-side tests drives a `FakeModel`. They prove the *scaffold* does not
@@ -500,15 +533,44 @@ offline test exists and reads like a result. It is not one: it asserts that
 writing 10,000 lines through `bash` does not move the request, which was never in
 doubt. What has never been run is a task whose *output* is the hard part.
 
-That probe now exists — `eval/benchmarks/volume.py` — and has not been run.
-Turn a corpus of records into a card each: the corpus is generated from a seed so
-it is the same on any machine and needs no network, which makes it the one probe
-in the repository that works on a fresh clone. It is built to be run **twice**,
-at 120 records and at 1,200: ten times the output, same geometry, and the claim
-is not that either run succeeds but that `max_request_tokens` does not move
-between the two rows while the output does. That is the shape the reading test
-already uses offline — 4KB against 4MB, one number asserted flat — and it is the
-only shape in which "infinite" means anything measurable.
+That probe now exists — `eval/benchmarks/volume.py` — and it has been run, twice,
+which is the point: the claim is not that either run succeeds but that
+`max_request_tokens` does not move between the two rows while the output does.
+That is the shape the reading test already uses offline — 4KB against 4MB, one
+number asserted flat — and it is the only shape in which "infinite" means
+anything measurable.
+
+| | records | output | largest request | steps | wall clock | accuracy |
+| --- | --- | --- | --- | --- | --- | --- |
+| row 1 | 120 | 10,631 bytes | 6,795 tokens | 25 | 310s | 120/120 |
+| row 2 | 1,200 | **106,274 bytes** | **6,446 tokens** | 15 | 144s | 1200/1200 |
+
+**Ten times the output, and the largest request fell by 349 tokens — 5.1%.** Both
+runs wrote every field of every card correctly, against a 16,530-token ceiling
+neither came close to. The clause holds, and it holds on the measurement rather
+than on the offline assertion.
+
+Three things in those rows are worth more than the verdict.
+
+**The bigger task was the easier one.** Row 2 did ten times the work in 15 steps
+against row 1's 25, stalled 5 times against 17, and its longest streak was 3
+against 12. Nothing about the geometry changed — what changed is that it went
+straight to writing a program, where row 1 spent twelve steps circling before it
+did. Size did not make this task harder; it made the shortcut obvious.
+
+**The program route is the route, and it is quantified rather than forbidden.**
+Row 2 generated 8,594 output tokens and produced 106,274 bytes — the file is
+**4.8×** everything the model generated, so most of it never passed through a
+generation at all. That is `bash` being unbounded by design (0.0.8b §1) doing
+exactly what it is for, and it is why the offline test was never evidence: the
+interesting question was never whether a scaffold can append, it is whether a run
+can keep its context fixed while the artefact outgrows it. It can.
+
+**It is two runs.** One per size, on a task where the winning move is a
+twenty-line regex, and both found it. What this does not show is a writing task
+where the content is irreducible — where each unit needs a generation, so the
+*number of generations* scales with the output and the context still has to hold
+still. That is the harder version of this clause and it is not written yet.
 
 Two things about it are worth knowing before reading its results:
 
@@ -525,12 +587,19 @@ Two things about it are worth knowing before reading its results:
   and not about where the characters came from. What separates the two routes is
   measured rather than forbidden: `generated_chars` against the bytes on disk.
 
-So the first Design Test needs live runs, and this iteration was spent making
-them cost one command instead of an afternoon (§1, `eval.run width`). What it
-could not do is run them: **this machine has no API credentials**, so every
-number in §4.1 comes from the trajectories of the five arms already on disk, and
-tier 3 of the mechanism is fitted to those and unvalidated. The next person with
-a key runs item 1 below and knows more than this document does.
+So one clause is left — complexity — and it needs the width arms. This iteration
+made them cost one command instead of an afternoon (§1, `eval.run width`), and
+they have not been run: they are six 80-step runs, which is hours and real spend,
+and that is a decision rather than a step. Tier 3 of §4.1's mechanism is fitted
+to the five old arms and has exactly two live runs against it, both of which
+passed — so it is flagged, not believed.
+
+Credentials come from `.env` — `src/infinite/__init__.py` calls `load_dotenv()`,
+so importing the package is enough and nothing needs exporting, as long as the
+command is run from the repository. Worth knowing because the failure looks like
+a scaffold bug: anything that touches the Anthropic SDK *without* importing
+`infinite` first raises "Could not resolve authentication method", which reads
+like a missing key rather than a missing import.
 
 ## 5. What to do next
 
@@ -558,11 +627,13 @@ needs an API key, which is why it is a list rather than a result.
    mechanism rather than a constant, and it is now cheaper than it was: the
    verdict changing is itself progress (`progress.py` counts it), so a gradient
    check and the stall measure test the same hypothesis from two directions.
-4. **Run the writing probe (4.8).** Built and never run, and the cheapest thing
-   on this list: `eval.run volume --config 120` then `--config 1200`, and compare
-   the two rows' `largest`. It needs no corpus and no network, so it is also the
-   only item here that a fresh clone can do. It closes a quarter of the first
-   Design Test, or shows why it cannot be closed.
+4. **Write the *irreducible* writing probe (4.8).** `volume` is run and the
+   clause holds, but both rows were won with a twenty-line regex, so what they
+   show is that the scaffold holds still while an artefact outgrows it — not that
+   a run can keep a fixed context while producing output that needs a generation
+   per unit. Same shape, two sizes, content a script cannot derive: a translation,
+   a per-record judgement, anything where the number of *generations* scales with
+   the output. That is the version of this clause that is still open.
 5. **Decide depth (4.4).** The choice is between a frame surcharge, a reserve a
    parent must keep, and leaving it unlegislated with the sentence doing the
    work. Whichever, it should be settled by running the probe at

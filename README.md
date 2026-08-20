@@ -332,11 +332,17 @@ held-out tests. See [`docs/Evaluation.md`](docs/Evaluation.md).
 Two probes in `eval/benchmarks/` are the project's own rather than a public
 dataset, because the Infinite Context Test asks for two things no benchmark
 measures. `width` is the task the whole series turns on — implement one module
-that calls into nine siblings — and `volume` is *infinite writing*: turn a corpus
-of records into a card each, run it twice at ten times the size, and the claim is
+that calls into nine siblings. `volume` is *infinite writing*: turn a corpus of
+records into a card each, run it twice at ten times the size, and the claim is
 not that either run succeeds but that the largest request does not move between
-the two rows while the output does. `volume` generates its corpus from a seed, so
-it needs no network and works on a fresh clone.
+the two rows while the output does. It generates its corpus from a seed, so it
+needs no network and works on a fresh clone.
+
+`volume` has been run and the clause holds: 120 records then 1,200, every field
+of every card correct in both, **ten times the output and the largest request
+5.1% smaller** — 106,274 bytes produced from 8,594 generated tokens against a
+6,446-token request. The rows are in
+[`eval/results/volume-0.0.8d.json`](eval/results/volume-0.0.8d.json).
 
 ```bash
 uv run python -m eval.run babilong --config 10M --split qa2 -n 1 --profile short

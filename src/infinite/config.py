@@ -210,11 +210,17 @@ class Config:
     #: the dump says so; None to never say. Every step's progress is recorded in
     #: the trajectory either way — this knob is only about telling the agent.
     #:
-    #: 3 because that is where the five 0.0.8 arms separate: every frame that
-    #: shipped a working module stalled at most four steps in a row and hit
-    #: three twice at most, while every frame that shipped nothing ran to six,
-    #: eight and nine. At 3 the line is rare in a healthy run and loud in a
-    #: livelock, which is the sensitivity a notice wants.
+    #: 3 because that is where the five 0.0.8 arms separated: every frame that
+    #: shipped a working module stalled at most four steps in a row, while every
+    #: frame that shipped nothing ran to six, eight and nine.
+    #:
+    #: That was fitted to one task and **the first live run on another refutes it
+    #: as a predictor**: `volume --config 120` passed with every field correct
+    #: and a twelve-step streak in the middle of it (0.0.8d §4.1). The streak was
+    #: a real livelock — it re-read its own instruction file three times and
+    #: re-counted its output six — and it broke out. So a threshold this low is
+    #: right for *noticing* and unproven for *pricing*, which is what
+    #: `stall_surcharge` is flagged for.
     stall_notice: int | None = 3
     #: 0.0.8d §4.1, tier three: extra steps of budget charged for each stalled
     #: step from `stall_notice` onward. 0 turns it off.
@@ -230,8 +236,14 @@ class Config:
     #:
     #: The threshold is what keeps this from taxing a strategy that works.
     #: Reading four files to decide is a stall and the system message asks for
-    #: it; three in a row is free. On the five 0.0.8 arms this prices health at
+    #: it; three in a row is free. On the five 0.0.8 arms this priced health at
     #: about one step in fifty and a livelock at one in four.
+    #:
+    #: The one live run there has been says the magnitude is aggressive: it took
+    #: 11 of 40 budget units on a run that passed with everything correct, and
+    #: left four steps of margin. Whether that pressure is what got it out of a
+    #: twelve-step loop at step 18, or nearly killed a run that would have got
+    #: out anyway, is one A/B and is the top of §5.
     stall_surcharge: int = 1
 
     # Firewall: writes are always confined to the workspace; these are the
