@@ -86,9 +86,36 @@ it should not be sold as saving output tokens.
 The control is 0.0.7i's failure: `infinite_agent/step_loop.py`, a stub in a
 workspace whose nine sibling modules are already written, a module that calls
 into six of them. Two 0.0.7 children spent 240 steps on it and wrote nothing.
-§8's target is *one child, under 60 steps*.
+§8's target is *implemented in fewer than 60 steps*.
 
-*(Results: see §8.)*
+One reference point had been misread until this run measured it. The 0.0.7
+attempt that *succeeded* on this task was not at `--short`: it ran at **22,460
+tokens of input**, the full 0.0.7f geometry, and it took 82 steps across two
+agents — one of which spent 68 of them writing a digest of Part 7 before the
+implementer got 14. So the interval to close was 6,063 (fails) to 22,460
+(succeeds), and 0.0.8's `--frame` sits at 8,053.
+
+| run | input | steps | outcome |
+| --- | ---: | ---: | --- |
+| 0.0.7g/i `--short` | 6,063 | 240 across two children | nothing written |
+| 0.0.7f, the control | 22,460 | 82 across two agents | passed |
+| **0.0.8 A, `--frame`** | **8,053** | **56 of its own, 80 charged** | **391 lines, check passed** |
+| 0.0.8 B, `--frame --max-depth 1` | 8,304 | 80 | 457 lines at step 80, refused |
+
+Arm A is §8's target met at a third of the input the 0.0.7 success needed, and
+its whole subtree — including a 24-step child that failed — came out of one
+80-step budget.
+
+Arm B is the more instructive one. It wrote the entire module in a single
+generation on step 80, the check ran for the first and only time, and it failed:
+
+```
+ImportError: cannot import name 'ToolRegistry' from 'infinite_agent.tools'
+```
+
+Seventy-nine steps of acquisition, one of writing, none of correcting, and a
+one-line error it never got to see. The diagnostic run before it died the same
+way with the same error at depth two. That is what §7.5 below is about.
 
 ## 7. What the runs said that the letters did not
 
@@ -149,9 +176,44 @@ signatures rather than first lines.
   not the prompt — so register 4 is 2,048 in `--frame` and the overshoot is free
   again.
 
+### 7.5 The check was a gate when it needed to be a signal
+
+Arm B and the diagnostic run both wrote a module that was one line from passing
+and died against a check they had never run. 0.0.8c §3 makes the check the thing
+that stops a lossy caller being unsafe, and it does — but only at the pop, which
+is after the work.
+
+7.3 is the other half and had been left as advice: *a human learns a signature
+faster from a failed import than from reading the file.* That is only true if
+the failed import happens. So the scaffold now runs the check after every step
+and puts one line at the top of the dump:
+
+```
+[Check] FAILS (exit 1): ImportError: cannot import name 'ToolRegistry' … — tool_output/…
+```
+
+It is affordable for the reason 0.0.8b §1 gives: a check is a machine operation,
+so it is unbounded and costs no width. A check slower than `check_live_seconds`
+stops being run that way and says so, because a test suite is a fine acceptance
+test and a poor heartbeat.
+
+The stub in this task carries that `ToolRegistry` import error itself, so under
+the heartbeat the agent is told the first real interface mismatch on step one —
+the fact the other arms spent forty steps grepping six modules to find.
+
 ## 8. Results
 
-*(Filled in when the A/B completes.)*
+| arm | geometry | outcome |
+| --- | --- | --- |
+| **A** unbounded depth | 8,053 in | **passed in 56 steps** (80 charged) |
+| **B** `--max-depth 1` | 8,304 in | wrote 457 lines on step 80; refused on one import |
+| **C** live check | 8,650 in | *(pending)* |
+| **D** canvas 12,288 (7.6's bisection) | 11,801 in | *(pending)* |
+
+One run per arm, so the arms are anecdotes and the pair A/B is not a
+measurement of depth. What the pair does say is that both single-root runs at
+~8k got within one import of a module 0.0.7 could not touch below 22k — which is
+a statement about the geometry, not about the ceiling.
 
 ## 9. Open questions for 0.0.8d
 
