@@ -42,7 +42,16 @@ number of facts that must be true at once — and three design letters answer it
 a generation in order to move, [`0.0.8b`](docs/InfiniteAgent%200.0.8b.md) says a
 model operation should be precise at one frame and lossy above it, and
 [`0.0.8c`](docs/InfiniteAgent%200.0.8c.md) makes `spawn` behave like the frame it
-already was. `--frame` is the configuration that carries all of it.
+already was. `--frame` is the configuration that carries all of it. **What it
+did** ([`0.0.8`](docs/InfiniteAgent%200.0.8.md)): the module with six-way fan-out
+that defeated 0.0.7 four times was implemented and imported in 56 steps at 8,053
+tokens of input, where the 0.0.7 attempt that managed it at all needed 22,460;
+the reading results did not move (six of six, four of them faster); and three of
+five attempts at that module wrote a complete implementation against 0.0.7's
+none-of-two. The axis the letters set out to fix is *not* fixed — what decides
+the task is when a run starts writing, and nothing here makes it start sooner —
+so [`Iterating to 0.0.8d`](docs/Iterating%20to%200.0.8d.md) is where the series
+goes next.
 
 ## The scaffold
 

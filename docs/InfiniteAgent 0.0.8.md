@@ -84,6 +84,51 @@ written. It holds, and it holds in the live runs too — the diagnostic run belo
 put five agents at five different depths on the API and the largest request any
 of them made was 7,742 tokens against a smallest-largest of 6,717.
 
+### The design tests, item by item
+
+[Design Tests (Top Down)](Design%20Tests%20(Top%20Down).md) names three things a
+good design must pass. Two of them 0.0.8 has evidence for and one it has never
+touched, and it is worth saying which is which.
+
+| test | status |
+| --- | --- |
+| infinite reading | **passed** — 10MB in nine steps at a fixed 8,400-token input |
+| infinite writing | **passed in the suite**, ten thousand lines with a flat request; live, 477 lines in one run |
+| infinite complexity | **partial** — the request does not move with steps or depth; the task that needs the complexity passes three times in five |
+| fixed context size | **passed** — enforced at construction, and five agents at five depths spanned 1,025 tokens |
+| computational completeness | **argued, never tested** — see below |
+| stack mode without recursion | **never tested** — see below |
+
+**Computational completeness.** The architecture supplies the three things the
+claim needs and no run has ever exercised them together. Unbounded storage is the
+filesystem; the read/write head is `bash`, on which the scaffold deliberately
+puts no limit (0.0.8b §1: a machine operation is bounded by need and nothing
+else); unbounded steps are `max_steps=None`, and the state that has to survive a
+step is register 2, which nothing but `set_target` writes. So the *scaffold* is
+trivially Turing-complete, because it can run programs. The interesting claim is
+about the agent — that model-driven control flow can express unbounded
+computation at fixed width — and nothing here is evidence for it. The test that
+would be is small and has not been run: give the agent a tape on disk, a
+transition table it may not hold in context, and `max_steps=None`, and see
+whether it terminates correctly on an input long enough that no strategy but
+paging can work.
+
+**Stack mode without recursion.** 0.0.8c answered the scaffold's half of this in
+the negative — `spawn` is the frame, no in-agent frame is needed — and that is
+not what the test asks. It asks whether the *model*, given the primitives, can
+run a stack itself: register 0 the path to the current frame, register 1 the
+strategy, push by writing a new file and moving the old path down, pop by
+reading the path back out. Every primitive that needs now exists — register 2 is
+the "global special register" the test asks for, and 0.0.8a's register-files
+make a push `cp $REGDIR/1 $REGDIR/6` rather than a generation — and no run has
+been asked to do it.
+
+The second half of that test is a real gap rather than an untested one. It asks
+that file reads be stacked too: several files open at once, with the status of
+each one kept. `load(path, start)` is stateless and there is no open-file table
+anywhere in the scaffold, so an agent paging through three documents holds three
+offsets in its own head or not at all. Nothing in 0.0.8 addresses it.
+
 ## 5. Transit costs nothing, so §3 stands on §4 alone
 
 0.0.8a's first open question was whether transit — "output tokens spent on
