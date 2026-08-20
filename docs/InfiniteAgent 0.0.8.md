@@ -203,27 +203,40 @@ the fact the other arms spent forty steps grepping six modules to find.
 
 ## 8. Results
 
-| arm | input | check | outcome |
-| --- | ---: | --- | --- |
-| **A** unbounded depth | 8,053 | import | **passed, 56 steps** (80 charged) |
-| **B** `--max-depth 1` | 8,304 | import | 457 lines on step 80, refused on one import |
-| **C** live check | 8,302 | import + no `NotImplementedError` | 80 steps, nothing written |
-| **D** canvas 12,288 (7.6) | 11,386 | import + no `NotImplementedError` | 80 steps, nothing written |
+| arm | input | heartbeat | check | outcome |
+| --- | ---: | --- | --- | --- |
+| **A** unbounded depth | 8,053 | no | import | **passed, 56 steps** (80 charged) |
+| **B** `--max-depth 1` | 8,304 | no | import | 457 lines on step 80, refused on one import |
+| **C** live check | 8,302 | yes | import + no `NotImplementedError` | 80 steps, nothing written |
+| **D** canvas 12,288 (7.6) | 11,386 | yes | import + no `NotImplementedError` | 80 steps, nothing written |
+| **E** live check, A's check | 8,226 | yes | import | **passed, 50 steps** (77 charged) |
 
 Three things have to be said about that table before anything is read out of it.
 
-**It is one run per arm, on a task with enormous variance.** Two arms wrote a
+**It is one run per arm, on a task with enormous variance.** Three arms wrote a
 complete module and two wrote none; the same scaffold, the same task, the same
 budget. At 0.0.7's geometry the score was nothing written in two attempts of 150
-steps each, so 2-of-4 is a real move — but 2-of-4 is not a number to tune
+steps each, so 3-of-5 is a real move — but 3-of-5 is not a number to tune
 against.
 
 **A/B and C/D did not get the same check.** A and B were given
 `python3 -c 'import …'`; C and D were given that *and* `! grep -q
 NotImplementedError`, which the stub fails outright. That was an error in
-setting the experiment up, and it means arm C cannot be read as a measurement of
-the live check: two variables moved. A fifth arm, with the heartbeat and A's
-check exactly, is the clean comparison.
+setting the experiment up: arm C cannot be read as a measurement of the live
+check, because two variables moved. Arm E is the repair — the heartbeat with A's
+check exactly — and it passed in 50 steps, six fewer than A, having spawned one
+child that also finished. So the heartbeat costs nothing and is not what
+distinguishes the arms.
+
+**What does line up with the outcome is the check string, and it lines up
+completely.** Both arms given `import` alone wrote a working module and one more
+came within a single import of it; both arms given the compound check wrote no
+implementation at all in eighty steps. With one run per cell that is a
+coincidence as easily as a cause, and it is worth stating as a hypothesis rather
+than a result: a verdict that cannot move until the work is finished is not a
+gradient, and `! grep -q NotImplementedError` cannot move until the last stub
+body is gone. An acceptance test that is also a heartbeat may need to be able to
+get *closer*, not only to pass or fail.
 
 **Arm D is the one result the confound does not spoil, and it is negative.**
 Tripling the canvas — 1,536 → 4,096 → 12,288, a working set of 14,032
@@ -232,12 +245,13 @@ Whatever binds this task, 7.6's bisection says it is not the size of the one
 register a working set can land in. That is 0.0.8a §5's argument, and it does
 not survive its first test.
 
-What the arms have in common is where the steps went. C spent 80 steps and 33
-`load`s building fifteen scratch files of signatures; D spent 80 steps and 53
-writes doing the same into a bigger canvas; B spent 79 steps on it and then
-wrote the whole module in one generation. Only A interleaved. The failure is not
-that the facts do not fit — it is that the run does not start writing until it
-believes it has all of them, and nothing in 0.0.8 makes it start sooner.
+What the failing arms have in common is where the steps went. C spent 80 steps
+and 33 `load`s building fifteen scratch files of signatures; D spent 80 steps
+and 53 writes doing the same into a bigger canvas; B spent 79 steps on it and
+then wrote the whole module in one generation and never got to correct it. A and
+E interleaved, and A and E passed. The failure is not that the facts do not
+fit — it is that a run does not start writing until it believes it has all of
+them, and nothing in 0.0.8 makes it start sooner.
 
 ## 9. What is actually left, after the runs
 
@@ -253,15 +267,25 @@ moved.
 | 8b §4 | a memo table, written by key | `facts.md` was read and never written |
 | 8c §2 | a brief should name, not describe | briefs came out well-formed every time |
 | 8c §3 | the check is what makes a lossy caller safe | true, and too late — hence 7.3 |
+| 7.3 | verify instead of read, every step | costs nothing; did not change the strategy |
 | 8c §5 | a child's steps should be charged | works; bounded the depth-4 cascade |
 | 8c §6 | the scaffold should have no opinion on depth | the one run of it produced the cascade |
 | 7.1 | a signature should cost a line | five calls in five runs |
 
 The honest summary is that 0.0.8 removed a set of *clerical* costs — a forced
 write, a re-typed value, an unbounded chain, a brief a parent could not author —
-and that the axis it set out to fix is unmoved by any of them. What decides the
-step_loop task is when the run starts writing, and every mechanism here is
-available to a run that never does.
+and that none of them is what the axis turns on. What decides the step_loop task
+is when the run starts writing, and every mechanism here is available to a run
+that never does.
+
+Two of them did decide something, and it is worth separating them from the rest:
+the frame in the context (§7.1), which turned a child that re-read its own goal
+27 times into one that has it, and charged steps (8c §5), which turned an
+unbounded chain from a hazard into a thing that runs out. Both are about
+*forgetting* rather than about width. That may be the more useful reading of the
+whole letter series: what a fixed context is short of is not room but continuity,
+and the things that helped are the ones that gave a step something the step
+before it had.
 
 ## 10. Open questions for 0.0.8d
 
