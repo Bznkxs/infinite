@@ -34,9 +34,12 @@ def test_the_dump_ceiling_is_every_register_at_its_limit(tmp_path):
     content = sum(config.register_limit(i) for i in range(config.num_registers))
     assert content == 100 + 100 + 200 + 121 + 200 + 100 + 100 + 400
     # Plus the header line every register emits, whether or not it holds
-    # anything, and the `[Step]` line at its very longest.
+    # anything, and the four state lines above them at their very longest:
+    # `[Step]`, `[Check]`, `[Stall]` and 0.0.8e's `[Ledger]`. They are close to
+    # mutually exclusive in practice — a run that is moving pays for none of the
+    # last three — so this is a ceiling rather than a typical step.
     assert config.dump_chars > content
-    assert config.dump_chars < content + 60 * config.num_registers + 300
+    assert config.dump_chars < content + 70 * config.num_registers + 1200
 
 
 def test_the_budget_counts_both_halves_of_a_generation(tmp_path):

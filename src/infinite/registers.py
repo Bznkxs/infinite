@@ -100,6 +100,7 @@ class RegisterFile:
         depth: int | None = None,
         check: str | None = None,
         stall: str | None = None,
+        ledger: str | None = None,
     ) -> str:
         """The register dump that makes up the model's context each step.
 
@@ -135,6 +136,14 @@ class RegisterFile:
         of state five runs show the agent acts on. It appears only while the run
         of steps that changed nothing is long enough to be a livelock, so a run
         that is working never pays for it.
+
+        `ledger` is 0.0.8e §2.2, and it is the same argument one step further.
+        `stall` is a sentence, and the 0.0.8d reconstruction read past it for a
+        hundred steps; a sentence repeated is wallpaper. This is the frame's own
+        trace instead — how long since anything moved, how long the check has
+        said the same thing, which files it keeps opening — with no advice in it
+        at all. Numbers that move cannot be habituated to the way a fixed
+        sentence can, and the agent cannot restate them away.
         """
         lines = []
         if step is not None or depth is not None:
@@ -166,6 +175,8 @@ class RegisterFile:
             lines.append(f"[Check] {check}")
         if stall:
             lines.append(f"[Stall] {stall}")
+        if ledger:
+            lines.append(f"[Ledger] {ledger}")
         lines.append("[Registers]")
         for i, value in enumerate(self.values):
             # The name comes first: with five special registers, "register 3"

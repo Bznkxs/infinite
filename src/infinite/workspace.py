@@ -12,21 +12,14 @@ from pathlib import Path
 #: shows up in the parent's next `ls` as if it were part of the work.
 SCRATCH_DIR = ".scratch"
 
-#: The run's memo table — 0.0.8b §4. Five runs opened by writing a digest of
-#: the specification, against the scaffold's advice, and it was read here first
-#: as avoidance and then as the model's answer to width. It is neither: it is a
-#: memo table in the wrong form — prose, written once, read whole — when what
-#: the work wants is a table written incrementally and read by key. One line in,
-#: one line out, and `grep` is the whole of the query. Shared by every agent in
-#: the workspace, because a fact one of them resolved is a fact the next one
-#: would otherwise resolve again.
-FACTS_FILE = "facts.md"
-
-FACTS_HEADER = (
-    "# facts\n"
-    "# One resolved fact per line, appended as it is resolved. `grep` before you go\n"
-    "# looking; a fact another agent paid for is one you should not pay for twice.\n"
-)
+#: 0.0.8b §4's memo table, `facts.md`, was removed in 0.0.8e §2.5. It worked as
+#: designed — the 0.0.8d reconstruction wrote seventeen lines to it unprompted,
+#: including a note about a seam mismatch of exactly the kind that killed the
+#: run — and what that run showed is the limit of the design: it records a fact
+#: *after* it is resolved, and a livelock is the state in which nothing is
+#: resolved, so it is empty precisely where it is needed. It was also a second
+#: opt-in memory competing with register 4 for one job. `Ledger` is the
+#: replacement and the scaffold writes it.
 
 #: Where the registers appear as files, inside the agent's own scratch directory
 #: so that neither an `ls` of the work nor the agent's own `rm` reaches them.
@@ -56,16 +49,6 @@ class Workspace:
         #: which is why five runs in a row opened by delegating a digest.
         self._spent = 0
         self._agents: set[str] = set()
-        self._facts_lock = threading.Lock()
-        #: Created empty-but-for-its-header, because the system message names it
-        #: every step. Until 0.0.8d nothing but `lookup` ever wrote it, so in
-        #: every run that did not call `lookup` the file did not exist while the
-        #: agent was being told it was the run's memo table — and three runs
-        #: opened by `cat`ing it and getting nothing. A header is the difference
-        #: between an empty table and a missing one.
-        facts = self.facts_path()
-        if not facts.exists():
-            facts.write_text(FACTS_HEADER, encoding="utf-8")
 
     def record_step(self, agent_id: str) -> None:
         with self._output_lock:
@@ -106,36 +89,7 @@ class Workspace:
         """
         return self.root / f"handoff-{agent_id}.json"
 
-    def facts_path(self) -> Path:
-        return self.root / FACTS_FILE
 
-    def remember(self, lines) -> int:
-        """Append facts that are not already on record. Returns how many landed.
-
-        Every agent in the run shares it and a step's children run at the same
-        time, so the append is locked and the file is opened for append rather
-        than rewritten.
-        """
-        path = self.facts_path()
-        with self._facts_lock:
-            existing = (
-                set(path.read_text(encoding="utf-8").splitlines())
-                if path.exists()
-                else set()
-            )
-            fresh = []
-            for line in lines:
-                line = line.strip()
-                if line and line not in existing:
-                    existing.add(line)
-                    fresh.append(line)
-            if not fresh:
-                return 0
-            with path.open("a", encoding="utf-8") as handle:
-                if handle.tell() == 0:
-                    handle.write(FACTS_HEADER)
-                handle.write("\n".join(fresh) + "\n")
-            return len(fresh)
 
     def reg_path(self, agent_id: str) -> Path:
         """Where this agent's registers appear as files."""

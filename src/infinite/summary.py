@@ -125,9 +125,35 @@ Leave out the agent's step-by-step narration, anything you cannot support from w
 
 Prefer keeping an older fact over the newest one when both do not fit: the newest step is still in the agent's other registers, and the oldest is only in yours.
 
+Two rules about how a run repeats itself, which are the reason this register exists:
+
+- **When a step changed nothing, do not restate the situation — age it.** You will be told whether the step left anything behind and how many in a row have not. Carry one line of the form "no progress on X for N steps" and increment N, rather than describing the same obstacle again in new words. A summary that says the same thing thirty times in thirty different sentences is how an agent loses track of how long it has been stuck.
+- **Never assert that anything builds, imports, passes, is fixed or is resolved.** You cannot check, and the agent's belief that it fixed something is not evidence that it did. Write what was *attempted* ("edited agent.py:98 to drop the cwd argument"), never what is now true ("BashSession bug fixed"). A machine check reports what is true; you report what was tried.
+
 Your summary must fit in {budget} characters, so that is the space you have. Use it — a summary well under it has thrown away room it could have kept a fact in — and do not exceed it. Write dense prose: notes, not narration.
 
 Your entire reply is the new contents of the register. Do not introduce it, do not comment on it, do not wrap it in quotes or a code fence, and do not address the agent or the operator. Write the summary and nothing else."""
+
+
+def _progress_section(moved: bool | None, streak: int) -> str:
+    """What the step left behind — 0.0.8e §2.1.
+
+    The summariser is given the previous summary and one step, so nothing in its
+    input has ever carried a count and no instruction could make it report one.
+    The scaffold already knows both facts; this is where they arrive.
+    """
+    if moved is None:
+        return ""
+    if moved:
+        return _section("Step's effect", "It changed durable state.")
+    body = "It changed nothing durable: no file, no target, no check verdict."
+    if streak:
+        body += f" That is {streak} step(s) in a row."
+        body += (
+            " Age the line you already have for this rather than writing a new"
+            " description of the same obstacle."
+        )
+    return _section("Step's effect", body)
 
 
 def build_input(
@@ -142,6 +168,8 @@ def build_input(
     cut_off: bool,
     budget: int,
     rejected: str | None = None,
+    moved: bool | None = None,
+    stall_streak: int = 0,
 ) -> str:
     """Everything the summariser is given: one step, and what it replaces.
 
@@ -162,6 +190,7 @@ def build_input(
 {_section("Step " + str(step) + ": what it thought", state + thinking)}
 {_section("Step " + str(step) + ": what it did", action)}
 {_section("Step " + str(step) + ": what came back", observations)}
+{_progress_section(moved, stall_streak)}
 ## What to return
 
 The summary so far, updated to include step {step}. Replace it whole — you are rewriting, not appending, and you may drop or rewrite anything already in it.
@@ -245,6 +274,8 @@ class Summariser:
         observations: str,
         cut_off: bool,
         limit: int,
+        moved: bool | None = None,
+        stall_streak: int = 0,
     ) -> SummaryUpdate:
         budget = self.config.summary_target(limit)
         name = self.config.summary_model or self.config.model
@@ -264,6 +295,8 @@ class Summariser:
                 cut_off=cut_off,
                 budget=budget,
                 rejected=rejected,
+                moved=moved,
+                stall_streak=stall_streak,
             )
             try:
                 response = self.model.generate(

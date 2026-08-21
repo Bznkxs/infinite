@@ -75,7 +75,6 @@ def build_system_message(
     check: str | None = None,
     goal: str | None = None,
     write: str | None = None,
-    facts_file: str | None = None,
     reg_dir: str | None = None,
 ) -> str:
     first_free = config.num_special_registers
@@ -141,14 +140,6 @@ def build_system_message(
         if reg_dir
         else ""
     )
-    memo_line = (
-        f"\n<{facts_file}> is this run's memo table, shared by every agent in it: one "
-        "resolved fact a line, appended as you resolve it. `grep` it before you go "
-        "looking — a fact another frame already paid for is a fact you should not pay "
-        "for twice.\n"
-        if facts_file
-        else ""
-    )
     # 0.0.8b's invariant and 0.0.8c's rule for when to descend. Both are
     # recommendations about how to work rather than determined actions, so by
     # 0.0.8a's rule they are sentences here and not tools.
@@ -169,7 +160,6 @@ def build_system_message(
         "End work with a machine check — an import, a test, a diff. A check against your "
         "own recollection is the mistake it is meant to catch, and a command costs you "
         "no context.\n"
-        + memo_line
     )
     # The two wide registers share a limit unless `max_target_length` splits
     # them, and when it does, saying the shared one is simply wrong: `set_target`

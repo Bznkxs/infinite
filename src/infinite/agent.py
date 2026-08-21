@@ -37,7 +37,7 @@ from .config import (
 )
 from .firewall import Firewall
 from .model import Model
-from .progress import Progress, stall_line
+from .progress import Ledger, Progress, read_paths, stall_line
 from .prompt import build_system_message
 from .regfile import RegisterShell
 from .registers import RegisterFile
@@ -290,6 +290,12 @@ class Agent:
         #: of steps that left nothing is. Built here rather than in `run` so the
         #: first step is measured against the workspace as it was handed over.
         self.progress = Progress(workspace.root)
+        #: 0.0.8e §2.2. Register 4 is rewritten whole every step, so it cannot
+        #: count: across the 0.0.8d reconstruction its root restated one defect
+        #: in 58 consecutive summaries and flipped its truth value four times.
+        #: Duration is kept here instead, by the scaffold, from facts the machine
+        #: knows exactly — and the model cannot argue with it.
+        self.ledger = Ledger()
         #: Budget charged for stalling, on the same footing as `charged`: steps
         #: this agent spent without leaving anything behind, priced so that a
         #: livelock is bounded by the resource rather than by a ceiling. 0.0.8c
@@ -413,7 +419,6 @@ class Agent:
             check=self.check if self.config.run_checks else None,
             goal=self.goal,
             write=self.write,
-            facts_file=self.workspace.display(self.workspace.facts_path()),
             reg_dir=(
                 f"${self.regshell.environment_variable}"
                 if self.regshell is not None
@@ -654,6 +659,11 @@ class Agent:
                             stalled=self.stalled,
                             stall=stall_line(
                                 self.progress.streak, self.config.stall_notice
+                            ),
+                            ledger=(
+                                self.ledger.line(self.config.stall_notice)
+                                if self.config.ledger
+                                else None
                             ),
                         ),
                     }
@@ -1077,6 +1087,7 @@ class Agent:
                 "cost": segment_steps + self.charged,
                 "stalled": self.stalled,
                 "progress": self.progress.summary(),
+                "ledger": self.ledger.summary(),
                 "registers": self.registers.snapshot(),
             }
         )
@@ -1129,6 +1140,7 @@ class Agent:
                     # that ran out of steps having stalled nine in a row is not a
                     # child to hand more steps to unchanged.
                     "progress": self.progress.summary(),
+                    "ledger": self.ledger.summary(),
                     # A child that died against a check its parent wrote wrongly
                     # has nothing to show for it unless the parent can see the
                     # check. The parent is the only one who can change it.
@@ -1315,6 +1327,16 @@ class Agent:
             target=self.registers.values[TARGET_REGISTER],
             check=self._check_line,
         )
+        # 0.0.8e §2.2/§2.4: what the step read, and how long the run has been
+        # where it is. Recorded after `Progress`, because the window it keeps
+        # resets on the progress this step may just have made.
+        self.ledger.record(
+            step=self.step,
+            moved=progress["moved"],
+            check=self._check_line,
+            paths=read_paths(results, self.progress.known()),
+        )
+        record["ledger"] = self.ledger.summary()
         surcharge = self._stall_surcharge(progress["stall_streak"])
         if surcharge:
             self.stalled += surcharge
@@ -1339,6 +1361,10 @@ class Agent:
             ),
             cut_off=cut_off,
             limit=limit,
+            # 0.0.8e §2.1: the count arrives in the input, because nothing that
+            # has to survive forty rewrites ever will.
+            moved=progress["moved"],
+            stall_streak=progress["stall_streak"],
         )
         assert self._summary_pool is not None
         self._pending = (record, self._summary_pool.submit(self._summarise, arguments))

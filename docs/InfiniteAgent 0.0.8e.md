@@ -79,7 +79,9 @@ progress — a count per path. It renders one line, above the registers:
 ```
 
 It appears only when there is something to report, so a run that is moving never
-pays for it. This is 0.0.8d §10.7's "specific, not generic" — the frame's own
+pays for it, and `--no-ledger` turns it off — an off switch is what makes the
+next result attributable rather than assumed, which is the mistake 0.0.8d §7.1
+opens by confessing. This is 0.0.8d §10.7's "specific, not generic" — the frame's own
 trace rather than a scold — and unlike the `[Stall]` line it is not a sentence
 that can become wallpaper, because its numbers change every step.
 

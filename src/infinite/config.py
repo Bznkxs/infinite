@@ -222,6 +222,12 @@ class Config:
     #: right for *noticing* and unproven for *pricing*, which is what
     #: `stall_surcharge` is flagged for.
     stall_notice: int | None = 3
+    #: 0.0.8e §2.2. The `[Ledger]` line: how long since anything moved, how long
+    #: the check has said the same thing, and which files this frame keeps
+    #: opening. Off restores 0.0.8d's dump, which is the A/B that says whether
+    #: duration-in-the-context is what changed anything — the mistake 0.0.8d
+    #: §7.1 confesses is shipping four changes and crediting one.
+    ledger: bool = True
     #: 0.0.8d §4.1, tier three: extra steps of budget charged for each stalled
     #: step from `stall_notice` onward. 0 turns it off.
     #:
@@ -260,11 +266,17 @@ class Config:
         enforces, not an average: what a step actually sends is this or less.
         """
         content = sum(self.register_limit(i) for i in range(self.num_registers))
-        # `--- register 10 (2560/2560 chars; canvas) ---` and a newline, plus
-        # `[Registers]` and the `[Step]` line at its longest — depth, the step
-        # counter, what children have debited, the run-wide total and the
-        # last-steps warning, all at once.
-        return content + 56 * self.num_registers + 260
+        # Plus, per register, the header line it always emits and its newline —
+        # `--- register 10 (4096/4096 chars; canvas, special, truncated) ---` is
+        # 66 with every tag set — and, once, the four state lines above them at
+        # their longest, measured rather than guessed: `[Step]` 268 (depth, the
+        # counter, what children and stalls have debited, the run-wide total and
+        # the last-steps warning, all at once), `[Check]` 269, `[Stall]` 253 and
+        # 0.0.8e's `[Ledger]` 329, plus `[Registers]` — 1,135 together.
+        #
+        # It is a ceiling and not a typical step: the last three are close to
+        # mutually exclusive, and a run that is moving pays for none of them.
+        return content + 66 * self.num_registers + 1135
 
     @property
     def working_set_chars(self) -> int:

@@ -1,4 +1,9 @@
-"""Whether a step left anything behind — 0.0.8d §4.1.
+"""Whether a step left anything behind, and how long it has been that way.
+
+0.0.8d §4.1 built the first half: `Progress`, the three tiers, and the stall
+streak. 0.0.8e §2.2 adds the second: `Ledger`, which keeps the *duration* the
+run's own memory cannot — see
+[Lossy Memory and the Loop](../../docs/Lossy%20Memory%20and%20the%20Loop.md).
 
 The first Design Test asks for *infinite complexity*: complete a task however
 complicated it is, while the context stays the same size. That is a claim about
@@ -14,10 +19,9 @@ either one left behind.
 Three terms, and only the third is a defect:
 
 * **Progress** — the step changed durable state: a file in the workspace, the
-  target register, the memo table, or the check's verdict. Everything else a
-  step makes, the next step or the one after overwrites: register 3 holds one
-  step, register 4 is rewritten every step, and register 0 is the last result
-  only.
+  target register, or the check's verdict. Everything else a step makes, the
+  next step or the one after overwrites: register 3 holds one step, register 4
+  is rewritten every step, and register 0 is the last result only.
 * **Stall** — a step that changed none of it. Not a defect. Reading four files
   in one step to decide is a stall, and the system message asks for exactly
   that.
@@ -45,6 +49,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -210,6 +215,144 @@ class Progress:
             "stalls": self.stalls,
             "longest_stall_streak": self.longest,
             "scan_seconds": round(self.scan_seconds, 3),
+        }
+
+    def known(self) -> set[str]:
+        """Workspace-relative paths as of the last scan.
+
+        The ledger uses it to tell a path in a shell command from a flag, a
+        pattern or a word: a token is a file if the workspace has one by that
+        name. Language-agnostic, and free — the scan already happened.
+        """
+        return set(self._files)
+
+
+#: The largest number of read paths the ledger names. The counts are the
+#: evidence; a frame reading twenty files is not in the loop this is for.
+LEDGER_PATHS = 4
+
+#: A hard cap on the line, so `Config.dump_chars` stays a real ceiling: a path
+#: is arbitrarily long and four of them would otherwise be unbounded.
+LEDGER_CHARS = 320
+
+#: A token has to look like a path before it is worth checking against the
+#: workspace: this is what keeps `grep -n` and `--no-firewall` out of the count.
+_PATH_TOKEN = re.compile(r"[\w./-]{3,}")
+
+
+def read_paths(results: list[Any], known: set[str]) -> list[str]:
+    """Which files this step read, out of its tool calls — 0.0.8e §2.4.
+
+    `Progress` scans what the workspace *holds*; nothing recorded what a step
+    *looked at*, and a livelock is made of looking. `load` states its path
+    outright. For `bash` the command is arbitrary text, so rather than parse a
+    shell this matches any token the workspace has a file for — accurate,
+    cheap, and it does not care what language the file is in.
+    """
+    basenames: dict[str, str] = {}
+    for path in known:
+        basenames.setdefault(path.rsplit("/", 1)[-1], path)
+    seen: list[str] = []
+    for result in results:
+        record = getattr(result, "record", None) or {}
+        tool = record.get("tool")
+        if tool == "load" and record.get("path"):
+            seen.append(str(record["path"]))
+        elif tool == "bash":
+            for token in _PATH_TOKEN.findall(record.get("command", "")):
+                token = token.strip("./")
+                if token in known:
+                    seen.append(token)
+                elif token in basenames:
+                    seen.append(basenames[token])
+    return seen
+
+
+class Ledger:
+    """How long things have been the way they are — 0.0.8e §2.2.
+
+    Register 4 is rewritten whole from the previous summary and one step, so
+    nothing in its input has ever carried a count and no instruction can make it
+    report one. Across the 0.0.8d reconstruction its root restated one defect in
+    **58 consecutive summaries** and flipped its truth value four times, and not
+    one of them said how long it had been going on.
+
+    So duration is kept here instead, by the scaffold, from facts the machine
+    knows exactly: when the last durable change happened, how long the check has
+    said the same thing, and which files this frame has read since it last got
+    anywhere. It is append-only in spirit — a rewrite cannot accumulate, which is
+    the whole diagnosis — and the model cannot argue with it.
+    """
+
+    def __init__(self) -> None:
+        self.step = 0
+        #: The last step that changed durable state. 0 means "not yet".
+        self.last_progress_step = 0
+        self.check_verdict: Any = UNSEEN
+        #: The step at which the current verdict was first seen.
+        self.check_since = 0
+        self.reads: Counter[str] = Counter()
+
+    def record(
+        self,
+        *,
+        step: int,
+        moved: bool,
+        check: str | None,
+        paths: list[str],
+    ) -> None:
+        """Close a step. `paths` is what it read, from `read_paths`."""
+        self.step = step
+        if moved:
+            self.last_progress_step = step
+            # The window is "since the run last got anywhere", so it starts over
+            # the moment it does. A frame that is moving has no history to answer
+            # for.
+            self.reads.clear()
+        for path in paths:
+            self.reads[path] += 1
+        if self.check_verdict is UNSEEN or check != self.check_verdict:
+            self.check_verdict, self.check_since = check, step
+
+    @property
+    def stalled_for(self) -> int:
+        return self.step - self.last_progress_step
+
+    def line(self, threshold: int | None) -> str | None:
+        """The `[Ledger]` line, or None while there is nothing to answer for.
+
+        Facts only, and no advice: the `[Stall]` line already carries the
+        argument, and 0.0.8d spent 103 steps proving that repeating an argument
+        is what turns it into wallpaper. What this adds is the frame's own trace,
+        which it cannot restate away.
+        """
+        if threshold is None or self.stalled_for < threshold:
+            return None
+        parts = [f"no progress for {self.stalled_for} steps"]
+        if self.last_progress_step:
+            parts[0] += f" (last: step {self.last_progress_step})"
+        if self.check_verdict is not UNSEEN and self.check_verdict is not None:
+            held = self.step - self.check_since + 1
+            if held >= threshold:
+                parts.append(f"check unchanged {held} steps")
+        repeated = [(p, n) for p, n in self.reads.most_common(LEDGER_PATHS) if n > 1]
+        if repeated:
+            parts.append(
+                "read since: " + ", ".join(f"{p} x{n}" for p, n in repeated)
+            )
+        line = ". ".join(parts) + "."
+        return line if len(line) <= LEDGER_CHARS else line[: LEDGER_CHARS - 1] + "…"
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "last_progress_step": self.last_progress_step,
+            "stalled_for": self.stalled_for,
+            "check_unchanged_steps": (
+                self.step - self.check_since
+                if self.check_verdict is not UNSEEN
+                else None
+            ),
+            "most_read_since_progress": dict(self.reads.most_common(LEDGER_PATHS)),
         }
 
 

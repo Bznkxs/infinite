@@ -205,6 +205,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-ledger",
+        action="store_true",
+        help=(
+            "Do not put the duration line in the dump (0.0.8e §2.2): how long since "
+            "anything moved, how long the check has said the same thing, and what the "
+            "frame keeps re-reading. The summariser still gets the progress signal."
+        ),
+    )
+    parser.add_argument(
         "--no-live-check",
         action="store_true",
         help=(
@@ -307,6 +316,8 @@ def collect_overrides(args, argv: list[str] | None = None) -> dict:
         overrides["stall_surcharge"] = 0
     if args.no_stall_notice:
         overrides["stall_notice"] = None
+    if args.no_ledger:
+        overrides["ledger"] = False
     if args.no_live_check:
         overrides["check_every_step"] = False
     if args.allow_read:

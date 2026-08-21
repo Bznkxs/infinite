@@ -133,16 +133,28 @@ the tools.
   way back. It lives in the agent's own scratch directory, so neither an `ls` of
   the work nor the agent's own `rm` reaches it
   ([`0.0.8a`](docs/InfiniteAgent%200.0.8a.md)).
-- **The memo table** — `facts.md`, one resolved fact a line, shared by every
-  agent in the workspace, written with `>>` and queried with `grep`: the
-  artefact five runs kept reaching for as a prose digest, in the form the work
-  wants. It exists from the moment the workspace does, header and all, because
-  the system message names it every step. 0.0.8 filled it from a `lookup(symbol)`
-  tool backed by an AST index; **0.0.8d removed that tool** — the index only
-  parsed Python, which made the one primitive meant to turn width into depth a
-  special case for one language, and `grep` is language-agnostic and already in
-  the agent's hands. Ten calls across five runs, none of them in the two runs
-  that passed.
+- **The ledger** — the run's memory of *how long*. Register 4 is rewritten whole
+  from the previous summary and one step, so nothing in its input ever carries a
+  count and no instruction can make it report one: across the 0.0.8d
+  reconstruction the root restated one defect in **58 consecutive summaries** and
+  flipped its truth value four times, and never once said how long it had been
+  going on. So duration is kept by the scaffold instead, from facts the machine
+  knows exactly, and appears above the registers once there is something to
+  answer for:
+  `[Ledger] no progress for 31 steps (last: step 85). check unchanged 31 steps.
+  read since: agent.py x8, run2.log x9`. Facts only and no advice — the `[Stall]`
+  line already carries the argument, and a sentence repeated a hundred times is
+  wallpaper. `--no-ledger` turns it off
+  ([`0.0.8e`](docs/InfiniteAgent%200.0.8e.md),
+  [`Lossy Memory and the Loop`](docs/Lossy%20Memory%20and%20the%20Loop.md)).
+  The summariser is given the same signal and told to *age* a repeated obstacle
+  rather than restate it, and forbidden from asserting that anything builds,
+  imports, passes or is fixed — the machine check reports what is true; the
+  summary reports what was tried.
+  0.0.8's `facts.md` memo table and its `lookup` tool are both **gone**: the
+  tool in 0.0.8d, because its AST index only parsed Python, and the table in
+  0.0.8e, because it records a fact only once the fact is resolved and a
+  livelock is the state in which nothing is.
 - **Workspace** — at most `workspace_tokens` generated per step. Over that, the
   generation is cut off, saved to the trajectory, no tool calls run, and
   register 1 flips to `True`.
