@@ -208,8 +208,154 @@ having stated in advance.
 
 ## 4. Experiment results
 
-*Written after the runs.*
+The offline suite: **352 tests, green.** The `facts.md` tests are deleted.
+
+The reconstruction ran once, bare, `--frame`, 500 steps at the root, and
+**failed** — ending on its own budget rather than by hand. Measures in
+[`eval/results/reconstruct-0.0.8e.json`](../eval/results/reconstruct-0.0.8e.json).
+
+**§3 named the number that would change my mind, and it moved the wrong way.**
+
+| | 0.0.8d | **0.0.8e** |
+| --- | ---: | ---: |
+| worst stall streak in the run | 31 (root, **unchecked**) | **22** (`3b382b1b`, checked) |
+| outcome | failed, stopped by hand at 472/500 | failed, **ended on budget** at 490/500 |
+| agents / steps / depth | 8 / 409 / 2 | 10 / 490 / 2 |
+| wall clock | 1h18m | 1h38m |
+| code lines / test lines | 2,330 / 0 | 2,228 / 0 |
+| digest written | 209,683 B | **73,166 B** |
+| largest request (ceiling) | 9,026 (16,852) | **8,653 (17,260)** |
+| spread across agents | 1,886 | 2,293 |
+| tokens in / out | 2.92M / 299K | 3.39M / 400K |
+
+### 4.1 The gates
+
+| gate | verdict | |
+| --- | --- | --- |
+| **complete** | **no** | Thirteen modules and 2,228 lines, and the layout was *renamed* rather than followed — `shell.py`, `launcher.py`, `extras.py` in place of `bash_tool.py`, `main.py`, `tools.py`. No firewall, no workspace module, no viewer, and **no test suite** (0 lines, a second time) |
+| **works** | **no** | The acceptance run was never executed. Four Wikipedia articles were downloaded (158-357KB) and a gradeable question established mechanically — *"on what date did Germany invade Poland"*, ground truth `1 September 1939`, found by grep before any run — and then the budget went on the step loop |
+| **faithful** | **no** | The renamed layout, and the root's own first declared deviation: *"I never read the 206KB spec whole."* |
+
+### 4.2 The mechanism fired, was specific, and did not deter
+
+This is the result, and it is negative for the thing this version is named after.
+
+`3b382b1b` — 74 steps, **58 of them stalls**, worst streak 22 — spent its second
+half being told exactly what it was doing, with the numbers climbing every step:
+
+```
+[Ledger] no progress for 12 steps (last: step 43). check unchanged 26 steps.
+         read since: smoke.py x16, infinite_agent/shell.py x7
+```
+
+It read `smoke.py` sixteen times and `shell.py` seven times, edited neither, and
+ran out. **The ledger was in its dump on 38 of its 74 steps.** So §1's
+falsification criterion is met: *a livelock of the same shape, with the ledger
+present and read past.*
+
+The honest conclusion is the one §1 wrote in advance: **the defect is affordance,
+not memory.** Making duration legible does not change what a frame does with it,
+and [0.0.8d §10.3](InfiniteAgent%200.0.8d.md)'s tool-withdrawal tier — refuse a
+read-only step at the threshold — is the next thing to try rather than this.
+
+### 4.3 What did work, and it was not the ledger
+
+**The measure now separates, for the first time honestly.** With §2.6 fixed, the
+run splits sharply rather than smoothly:
+
+| frames | steps | stalls |
+| --- | ---: | ---: |
+| `3b507712`, `8ea37041`, `601a3760` | 70, 45, 9 | **0, 0, 0** |
+| `3b382b1b` | 74 | **58** |
+| the four depth-2 children | 21-43 | 14-18 |
+
+Three frames made durable progress on **every single step**. One made it on
+sixteen of seventy-four. That is a real signal and 0.0.8d could not have seen it,
+because every checked frame there read as healthy.
+
+**The constructing check earned its place.** The agent wrote a genuine 217-line
+`smoke.py` with 26 assertions, 18 of which pass — it built the object graph, ran
+a step against a fake model, and checked that the dump opened correctly. Nothing
+vacuous. And **the check refused the root's response**: the root wrote a complete,
+schema-valid `response-08d16ea8.json`, the scaffold ran `smoke.py`, it failed, and
+the response was not a return. That is 0.0.8c §3 doing its job on this task for
+the first time — 0.0.8d's import check would have accepted it.
+
+**The self-report is honest**, which the schema asks for and which is worth more
+than a clean one. The root declared the renaming, declared *"I never read the
+206KB spec whole"*, declared that the acceptance run never happened, and pasted
+its own failing check output into `unfinished`.
+
+**The digest shrank by a factor of 2.9** — 73KB against 209KB — with `facts.md`
+gone. That is one run and it is not attributable to the removal.
+
+### 4.4 Three frames did everything right and still failed
+
+`3b507712` stalled **zero times in seventy steps** and ran out without a response.
+So did `8ea37041` at 45 and `601a3760` at 9. Nothing about those frames is a
+livelock; they were simply given less budget than the job took. That is
+0.0.8c §9.3's unanswered question — *how does a parent allocate steps it cannot
+estimate* — and it is now the largest single cause of failure in this run rather
+than a footnote.
+
+### 4.5 The digest habit, and the hole it sits in
+
+The first attempt at this run (voided by §2.6, kept in
+`runs/reconstruct_infinite_0.0.8e-void1`) spent **113 steps and eight agents
+writing 107KB of spec digest** before a line of code, with byte-count checks:
+`test $(wc -c < docs/parts/02-budget.md) -ge 3500`.
+
+**Writing a digest is progress by definition**, so neither the stall measure nor
+the ledger can see it. 0.0.8d §3 said "writing *something* is not the test" and
+this mechanism inherits that hole whole: it catches frames that write nothing and
+is blind to frames writing the wrong thing.
+
+### 4.6 A wart in this version's own code
+
+The `[Ledger]` line reported
+`read since: .venv/lib/python3.12/site-packages/pygments/lexers/shell.py x2`.
+`read_paths` falls back to matching a bare basename, and `Progress.scan` walks
+`.venv`, so a mention of `shell.py` resolved to a vendored lexer. Noise in the
+evidence line, and an argument for pruning `.venv` and `.uvpython` from the scan
+the way `tool_output/` already is.
 
 ## 5. Handoff to the next version
 
-*Written after the runs.*
+**What is settled.** Duration-in-the-context is built, cheap, and does not work
+as a deterrent (§4.2). One run, but the run is the flagship task and the frame
+was told 38 times. Do not spend another version making the notice better; §4.2 is
+what a better sentence buys.
+
+**What §2.6 costs the previous version.** A red check registered as progress on
+every step, so 0.0.8d's `width` stall rates and every checked frame's numbers in
+that document are artefact. Its root's 103 stalls stand because it had no check.
+Anything else that cited a stall rate from a checked run needs re-reading.
+
+**Ranked, for whoever takes 0.0.9:**
+
+1. **Withdraw the option, do not raise the price.** 0.0.8d §10.3. At a streak of
+   N, refuse a read-only step: `load` and read-shaped `bash` return *you have
+   read N times without changing anything; this step must write*. The precedent
+   is the depth floor — a refusal in a register was ignored five times in
+   thirty-four steps, and removing the tool ended it at once. This is the one
+   remaining candidate that is a mechanism rather than a message, and it must
+   ship **alone**, with the ledger held constant, or the next run cannot say
+   which of them worked.
+2. **Allocation, not looping, is now the biggest killer** (§4.4). Three frames
+   with zero stalls ran out. A frame that returns "I needed more" is already the
+   handoff of 0.0.7h; nothing decides *when* to resume, and a parent watching a
+   child at 0 stalls burn its last step should resume it rather than re-brief it.
+3. **Nothing can see a run writing the wrong thing** (§4.5). A digest is durable
+   state, so it is progress. The `width` and `volume` probes are too small for
+   the habit to appear, which is why this only ever shows up here.
+4. **The seams are still the disease.** 0.0.8e's own declared deviation is
+   `_apply_side_effects` vs `dispatch` — the same class of failure as 0.0.8d's
+   seven, in a run whose check was much better. The constructing check caught it
+   *and named it*, which is progress; what is missing is anything that stops a
+   brief splitting a module from its callers.
+5. **Prune `.venv` from the progress scan** (§4.6). Small.
+
+**What not to redo.** The check design is settled: constructing, not importing,
+and the agent writes it. It produced a real 217-line smoke test, refused a
+response that 0.0.8d would have accepted, and turned a seam bug into a named
+line. Keep it, and keep giving the root one.

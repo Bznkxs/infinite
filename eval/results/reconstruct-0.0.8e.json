@@ -1,0 +1,186 @@
+{
+ "test": "The Reconstruction Test \u2014 the scaffold rebuilds itself from a condensed spec of itself, then runs what it built",
+ "version": "0.0.8e",
+ "outcome": "FAILED",
+ "ended": "on its own budget, 490 of 500 units \u2014 not stopped by hand",
+ "staging": "bare \u2014 the condensed spec alone, unchanged from 0.0.8d, plus a root --check that constructs (0.0.8d \u00a710.1)",
+ "geometry": "--frame, --max-steps 500 at the root, claude-opus-5 at high effort, spawn left to the agent",
+ "root_check": "./.venv/bin/python smoke.py \u2014 a check the agent writes: build the object graph, run one step against a fake model, assert the dump is right",
+ "workspace": "runs/reconstruct_infinite_0.0.8e (gitignored; this file is the evidence). The voided first attempt is -void1",
+ "spec": {
+  "file": "docs/InfiniteAgent 0.0.8e-simple (condensed spec).md",
+  "bytes": 206670,
+  "lines": 4049,
+  "parts": 14
+ },
+ "gates": {
+  "complete": {
+   "passed": false,
+   "detail": "13 modules, 2,228 lines, and the layout renamed rather than followed \u2014 shell.py, launcher.py, extras.py for bash_tool.py, main.py, tools.py. No firewall, no workspace module, no viewer, and no test suite (0 lines)."
+  },
+  "works": {
+   "passed": false,
+   "detail": "The acceptance run was never executed. Four articles downloaded (158-357KB) and a gradeable question established mechanically before any run \u2014 'on what date did Germany invade Poland', ground truth '1 September 1939' \u2014 then the budget went on the step loop."
+  },
+  "faithful": {
+   "passed": false,
+   "detail": "The renamed layout, and the root's own first declared deviation: 'I never read the 206KB spec whole.'"
+  }
+ },
+ "pre_registered_criterion": {
+  "named_in": "\u00a73: the root's longest stall streak; 0.0.8d's was 31",
+  "result": "22, by a checked frame, with the ledger in its dump on 38 of its 74 steps",
+  "verdict": "FALSIFIED \u2014 \u00a71 said a livelock of the same shape with the ledger present and read past would mean the defect is affordance, not memory. It is."
+ },
+ "measures": {
+  "wall_clock_s": 5900,
+  "wall_clock": "1h38m",
+  "agents": 10,
+  "tree_depth": 2,
+  "steps": 490,
+  "budget_consumed": {
+   "root_own": 139,
+   "charged_to_children": 342,
+   "stall_surcharge": 10,
+   "of": 500
+  },
+  "code_lines": 2228,
+  "code_files": 15,
+  "test_lines": 0,
+  "smoke_py_lines": 217,
+  "smoke_assertions": "18 of 26 passing at the end",
+  "digest_bytes": 73166,
+  "digest_files": 25,
+  "tokens_in": 3392251,
+  "tokens_out": 399620,
+  "largest_request_tokens": 8653,
+  "context_ceiling_tokens": 17260,
+  "largest_request_spread_tokens": 2293,
+  "output_tokens_per_step": {
+   "median": 481,
+   "max": 8192
+  },
+  "summariser": {
+   "calls": 486,
+   "retried": 8,
+   "retry_rate": 0.016,
+   "truncations": 0,
+   "share_of_agent_clock": 0.144
+  },
+  "ledger_shown_steps": 119,
+  "of_steps": 490
+ },
+ "fixed_context_held": {
+  "verdict": true,
+  "detail": "Largest request 8,653 tokens against a 17,260 ceiling; 10 agents across 3 depths spanned 2,293. Half its own geometry, again \u2014 the context is not what bound this."
+ },
+ "per_frame_stalls": [
+  {
+   "agent": "08d16ea8",
+   "depth": 0,
+   "steps": 139,
+   "stalls": 20,
+   "worst": 7,
+   "ledger_shown": 36,
+   "ok": false
+  },
+  {
+   "agent": "3b382b1b",
+   "depth": 1,
+   "steps": 74,
+   "stalls": 58,
+   "worst": 22,
+   "ledger_shown": 38,
+   "ok": false,
+   "note": "the livelock. read smoke.py x16 and shell.py x7 without editing either, told the whole time, ran out."
+  },
+  {
+   "agent": "3b507712",
+   "depth": 1,
+   "steps": 70,
+   "stalls": 0,
+   "worst": 0,
+   "ledger_shown": 0,
+   "ok": false,
+   "note": "did everything right and still ran out \u2014 allocation, not looping."
+  },
+  {
+   "agent": "8ea37041",
+   "depth": 1,
+   "steps": 45,
+   "stalls": 0,
+   "worst": 0,
+   "ledger_shown": 2,
+   "ok": false
+  },
+  {
+   "agent": "601a3760",
+   "depth": 1,
+   "steps": 9,
+   "stalls": 0,
+   "worst": 0,
+   "ledger_shown": 0,
+   "ok": false
+  },
+  {
+   "agent": "5318419e",
+   "depth": 2,
+   "steps": 21,
+   "stalls": 14,
+   "worst": 5,
+   "ledger_shown": 5,
+   "ok": true
+  },
+  {
+   "agent": "6bb3e59a",
+   "depth": 2,
+   "steps": 39,
+   "stalls": 18,
+   "worst": 5,
+   "ledger_shown": 18,
+   "ok": true
+  },
+  {
+   "agent": "97dc8035",
+   "depth": 2,
+   "steps": 22,
+   "stalls": 15,
+   "worst": 6,
+   "ledger_shown": 11,
+   "ok": true
+  },
+  {
+   "agent": "b9dc3df4",
+   "depth": 2,
+   "steps": 43,
+   "stalls": 14,
+   "worst": 3,
+   "ledger_shown": 3,
+   "ok": false
+  },
+  {
+   "agent": "c97f9cc8",
+   "depth": 2,
+   "steps": 28,
+   "stalls": 16,
+   "worst": 4,
+   "ledger_shown": 6,
+   "ok": true
+  }
+ ],
+ "what_worked": [
+  "The measure separates honestly for the first time: three frames at 0 stalls (70, 45, 9 steps) against one at 58 of 74. 0.0.8d could not have seen this \u2014 \u00a72.6's defect made every checked frame read as healthy.",
+  "The constructing check earned its place. The agent wrote a real 217-line smoke.py with 26 assertions, and the scaffold REFUSED the root's complete, schema-valid response because that check failed. 0.0.8d's import check would have accepted it.",
+  "The self-report is honest: the renaming, the unread spec, the missing acceptance run, and its own failing check output, all declared.",
+  "The digest shrank 2.9x \u2014 73KB against 209KB \u2014 with facts.md gone. One run; not attributable."
+ ],
+ "what_did_not": [
+  "The ledger did not deter. \u00a74.2. The frame was told 38 times, with climbing counts, and burned its whole allocation.",
+  "Allocation is now the biggest killer: three frames with zero stalls ran out of steps (0.0.8c \u00a79.3).",
+  "Nothing can see a run writing the WRONG thing. The voided first attempt spent 113 steps and 8 agents on 107KB of digest with byte-count checks; a digest is durable state, so it is progress.",
+  "The seams are still the disease: the root's declared deviation is `_apply_side_effects` vs `dispatch`, the same class as 0.0.8d's seven."
+ ],
+ "corrections_to_earlier_results": [
+  "\u00a72.6: a red check registered as progress on every step, from 0.0.8d's heartbeat until this version. 0.0.8d's width stall rates (5.6%, 8.5%, 4.8%) and every checked frame's stall count in that document are artefact; its root's 103 stalls stand because it had no check."
+ ]
+}
