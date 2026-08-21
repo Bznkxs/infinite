@@ -64,6 +64,20 @@ rather than an argument — with the caveat that four things changed at once and
 mechanism 0.0.8d is named for collected two budget units across those three runs,
 so it is the least likely cause of its own success.
 
+**And then it failed the test that is all of those at once.**
+[The Reconstruction Test](docs/The%20Reconstruction%20Test.md) — the scaffold
+rebuilding itself from a condensed spec of itself, and then running what it
+built — was attempted at 0.0.8d and did not pass
+([`§5.1`](docs/InfiniteAgent%200.0.8d.md)): 10 of 17 modules, no tests, six
+acceptance-run attempts and no answer, stopped with the root livelocked for 31
+consecutive steps. The context was not what bound it — the largest request was
+9,026 tokens against a 16,852 ceiling — and the measure caught the loop live,
+where a repetition detector provably would not have (99% of the looping
+frame's commands were distinct). What it died on was **seams**: ten modules
+written by four agents, seven signature mismatches found one at a time, behind
+checks that only tested `import` and so passed on a package that could not
+construct an agent. §10 of the build note is what to do about it.
+
 ## The scaffold
 
 Every step is a *stateless* model call. The only user message is
@@ -425,12 +439,16 @@ file per version, five numbered sections (aim, modifies, evaluate, results,
 handoff), with the first three written *before* the implementation and the
 experiment and the last two after, as two commits to the same file. The point of
 the split is that a criterion written after the numbers are in is not a
-criterion.
+criterion. A version whose other tests pass then attempts [The Reconstruction
+Test](docs/The%20Reconstruction%20Test.md), which is the last one it takes.
 
 | | |
 | --- | --- |
 | [`Design Tests (Top Down)`](docs/Design%20Tests%20(Top%20Down).md) | The only statement of what "done" means. One page. Start here. |
+| [`Standard Evaluations`](docs/Standard%20Evaluations.md) | Every evaluation the project runs, the command for each, what its grade actually checks — and, marked as gaps, what has no script and what has no correctness check. |
+| [`The Reconstruction Test`](docs/The%20Reconstruction%20Test.md) | The scaffold rebuilds itself from a condensed spec of itself, then runs what it built. The last test a version takes, and the hardest. How to build one, and how to grade it. |
 | [`Depth, Volume and Width`](docs/Depth,%20Volume%20and%20Width.md) | The diagnosis the 0.0.8 series answers, and the axis a fixed context is actually defeated by. |
+| [`Lossy Memory and the Loop`](docs/Lossy%20Memory%20and%20the%20Loop.md) | Why register 4 does not keep a run out of a loop, off the 0.0.8d reconstruction, and what to build instead. Input to 0.0.9. |
 | [`InfiniteAgent 0.0.X.md`](docs/InfiniteAgent%200.0.8d.md) | One per version. A letter (`0.0.8a`) is a version that stands on its own, not a chapter of another. |
 | [`Iterating to 0.0.8d`](docs/Iterating%20to%200.0.8d.md) | The working handoff: problems ranked, what to do next, and the pitfalls that have already cost time. §7 is the reading order for everything above. |
 | [`Trajectory Format`](docs/Trajectory%20Format.md) | What a run writes to disk, field by field. |

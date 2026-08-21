@@ -1,0 +1,88 @@
+{
+ "test": "The Reconstruction Test — the scaffold rebuilds itself from a condensed spec of itself, then runs what it built",
+ "version": "0.0.8d",
+ "outcome": "FAILED",
+ "staging": "bare — the condensed spec alone; no RECON_NOTES.md, no API.md, no BUILD_PLAN.md, nothing pre-implemented",
+ "geometry": "--frame, --max-steps 500 at the root, claude-opus-5 at high effort, spawn left to the agent",
+ "workspace": "runs/reconstruct_infinite_0.0.8d (gitignored; this file is the evidence)",
+ "spec": {
+  "file": "docs/InfiniteAgent 0.0.8d-simple (condensed spec).md",
+  "bytes": 199179,
+  "lines": 3904,
+  "parts": 13,
+  "note": "75% larger than 0.0.7f-simple's 114KB, against the 'grow by a third' the test document guessed. The canvas it must be paged through is 4,096 chars rather than 20,000, so the ratio §2.1 calls the right order of magnitude — five times what a context holds — is nineteen times here."
+ },
+ "stopped": "by the operator at 472 of 500 budget units, with 29 left, after the root had spent 103 of its 120 steps changing nothing durable",
+ "gates": {
+  "complete": {
+   "passed": false,
+   "detail": "10 of 17 modules; the package imports; 2,330 lines against 0.0.7f's 5,529. No summariser, no firewall, no progress measure, no regfile, no viewer, and no test suite at all (0 lines against 0.0.7f's 5,017)."
+  },
+  "works": {
+   "passed": false,
+   "detail": "The acceptance run was attempted six times and never completed. A 250KB World War II article was downloaded and a gradeable question written (case-sensitive count of 'Stalingrad'), so the setup was right; every attempt died in the reconstruction's own import path."
+  },
+  "faithful": {
+   "passed": null,
+   "detail": "Not gradeable — too much of the system does not exist. What does exist deviates: no summariser means register 4 is unimplemented, and the agent printed the first 8 characters of ANTHROPIC_API_KEY at root step 106, which TASK.md forbids."
+  }
+ },
+ "measures": {
+  "wall_clock_s": 4685,
+  "wall_clock": "1h18m",
+  "agents": 8,
+  "tree_depth": 2,
+  "steps_recorded": 409,
+  "budget_consumed": {"own": 120, "charged_to_children": 276, "stall_surcharge": 76, "total": 472, "of": 500},
+  "code_lines": 2330,
+  "code_files": 12,
+  "test_lines": 0,
+  "modules_present": ["config.py", "registers.py", "prompt.py", "tools.py", "bash_tool.py", "agent.py", "model.py", "trajectory.py", "workspace.py", "main.py"],
+  "modules_missing": ["regfile.py", "progress.py", "summary.py", "firewall.py", "viewer/reader.py", "viewer/server.py", "viewer/index.html"],
+  "package_imports": true,
+  "prose_digest_bytes": 209683,
+  "prose_digest_files": 20,
+  "prose_note": "Chunk-by-chunk re-transcriptions of the spec into .scratch/. More bytes of digest than the 199KB spec itself — the 0.0.6 failure mode, at scale.",
+  "facts_md_lines": 17,
+  "tokens_in": 2915092,
+  "tokens_out": 298892,
+  "largest_request_tokens": 9026,
+  "context_ceiling_tokens": 16852,
+  "largest_request_spread_tokens": 1886,
+  "output_tokens_per_step": {"median": 437, "max": 8192},
+  "summariser": {"calls": 404, "retried": 9, "retry_rate": 0.022, "truncations": 0, "share_of_agent_clock": 0.375},
+  "repeated_tool_errors": 0
+ },
+ "fixed_context_held": {
+  "verdict": true,
+  "detail": "Largest request 9,026 tokens against a 16,852 ceiling, and 8 agents across 3 depths spanned 1,886 tokens. The run never came near its own geometry — so whatever bound it, the size of the context is not it."
+ },
+ "the_loop": {
+  "what_it_was": "Seven seam mismatches, discovered one at a time. agent.py and main.py were written by different agents from the ones that wrote their callees, and each acceptance-run attempt surfaced exactly one disagreement.",
+  "sequence": [
+   "Config.from_args — does not exist (runs/rc1/run.log, twice)",
+   "timeout: command not found (runs/rc1/run3.log — environment, not a seam)",
+   "ModelClient.from_config — does not exist (runs/rc1/run_final.log)",
+   "RegisterFile.value — does not exist (runs/rc2/run.log)",
+   "Trajectory.open — does not exist (runs/rc2/run3.log)",
+   "BashSession.__init__() got an unexpected keyword argument 'cwd' (runs/rc2/run2.log) — the one it never fixed"
+  ],
+  "root_stall_streaks": [31, 26, 10, 7, 7, 4, 3, 3, 3, 2, 2, 2, 2, 1],
+  "root_stalled_steps": "103 of 120",
+  "anatomy": "Across the 31-step streak the root cycled three files and never edited either of the two that had to agree: sed of agent.py:85-115 (8 times), tail of runs/rc2/run2.log (9 times), sed of bash_tool.py:1-60 (3 times), grep for 'BashSession(' or 'def __init__' (5 times).",
+  "it_knew_the_fix": "Root step 112's thinking: 'There's an error about BashSession not accepting a cwd keyword argument. I need to check the actual signature in bash_tool.py and fix the call in agent.py around line 98, so let me grep for the class definition first.' It then grepped instead of editing. Step 108: 'There's a note about something already being patched, so I should verify what state that's in before making changes.'",
+  "not_repetition": {
+   "distinct_commands": 139,
+   "bash_calls": 141,
+   "repeat_rate": 0.01,
+   "byte_identical_outputs": 0.03,
+   "detail": "The commands were 99% distinct and only 3% of outputs were byte-identical: sed -n '85,115p' then '86,125p' then '90,110p'; tail -30 then -40 then -c 600 then cat. The agent varied the command every step while re-reading the same regions of the same three files. A repetition detector scores this root at 1% and calls it healthy; the progress measure scores it 103 stalls in 120 steps and is right."
+  }
+ },
+ "what_this_says_about_0.0.8d": [
+  "The progress measure is validated on a task it was not fitted to. It was built from five arms of one probe and it caught the flagship run's livelock live, on the one signal — durable state changed — that a repetition detector provably would have missed here.",
+  "The price did not work. The surcharge collected 76 budget units on the root alone, against 14 across all five live 0.0.8d probe runs, and the root stalled for 31 consecutive steps while being told and charged the whole time. 0.0.8d §7.2 asked whether the pressure gets a run out of a loop; on this run the answer is no.",
+  "The notice did not work either. The [Stall] line was in the dump for most of 103 steps and the root read past it. A price and a notice are both signals, and this run says the agent does not act on either one when it believes it is one grep from the answer.",
+  "facts.md was used — 17 lines, and two of them record a seam mismatch of exactly the kind that killed the run ('RegisterFile.__init__ takes only (config)'). It records facts after they are resolved, and a livelock is the state where nothing is resolved, so the table is empty precisely where it is needed."
+ ]
+}

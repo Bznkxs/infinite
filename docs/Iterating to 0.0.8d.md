@@ -43,6 +43,17 @@ why: four things changed at once, and the mechanism this letter is named for
 collected two budget units across those three runs, so it is the least likely
 cause of its own success. §5 item 1 is the arm that separates them.
 
+**And 0.0.8d has not passed the reconstruction test.** Every probe it set out to
+run passed, so by the convention [Writing a
+Version](Writing%20a%20Version.md) now records it should have gone on to the one
+test that is the claim rather than a component of it — the agent rebuilding
+InfiniteAgent from a condensed spec of itself, under 0.0.8d's own geometry. It
+was never attempted. The task is written down for the first time in [The
+Reconstruction Test](The%20Reconstruction%20Test.md) — how to build one for a
+version, and the three gates it is graded by — and building it for the 0.0.8
+series is §5 item 6. The last version to pass it was 0.0.7f, at 46,684 tokens a
+generation; nothing since has tried at any size.
+
 Three other things happened under this heading: the numbers in the 0.0.8 note
 were re-derived from the trajectories and several moved (§7), `lookup` was removed
 outright (§4.0), and the eval harness turned out never to have passed a `check`
@@ -621,8 +632,12 @@ was empty for two of the four clauses until this letter.
 
 1. **Complexity is one task.** `step_loop.py` is the task this whole series was
    shaped by, so passing it three times says the shape is right and does not say
-   the scaffold is general. SWE-bench under `--frame` has never been run (§5) and
-   the flagship reconstruct task has never been run under 0.0.8 at all.
+   the scaffold is general. SWE-bench under `--frame` has never been run (§5),
+   and the [Reconstruction Test](The%20Reconstruction%20Test.md) — the flagship,
+   and the task `step_loop.py` was cut out of — has never been run under 0.0.8 at
+   all. **0.0.8d has not passed it**, and that is the honest ceiling on this
+   table: the probe passes on the one module, and the whole system it belongs to
+   has not been rebuilt at this geometry.
 2. **Writing is script-derivable.** Both `volume` rows were won by writing a
    regex, so what they show is a context holding still while an artefact outgrows
    it — not a run producing output that needs a generation per unit. The harder
@@ -740,10 +755,24 @@ needs an API key, which is why it is a list rather than a result.
    parent must keep, and leaving it unlegislated with the sentence doing the
    work. Whichever, it should be settled by running the probe at
    `--max-depth 0/1/none` more than once each.
-6. **Run the flagship.** The full reconstruct task
-   (`runs/reconstruct_infinite_0.0.7i/TASK.md`) has never been run under 0.0.8.
-   About three hours. It is the only test that exercises fan-out, and it is how
-   every previous letter in this series was judged.
+6. **Run the flagship — 0.0.8d did not, and that is the open item that matters
+   most.** [The Reconstruction Test](The%20Reconstruction%20Test.md) is how to
+   build one and how to grade it; the 0.0.7i workspace
+   (`runs/reconstruct_infinite_0.0.7i/TASK.md`) is the template. It has never been
+   run under 0.0.8 at any letter, and the last version to pass it was 0.0.7f at
+   46,684 tokens a generation — so whether the `--frame` geometry, with 18,000
+   tokens the ceiling on a whole generation, can rebuild the whole scaffold is
+   simply unknown. It is the only test that exercises fan-out,
+   it is how every previous letter in this series was judged, and it is now the
+   last test a version takes by convention (`Writing a Version`).
+
+   The work is more than the run: the condensed spec stops at 0.0.7f, so the 0.0.8
+   series — the structured brief and its `check`, charged children, no depth
+   ceiling, destination registers, the shell-reachable registers, 0.0.8d's
+   progress tiers — has to be condensed into it first, with a new final config
+   table, since every geometry number moved. Budget a session for the spec, and
+   for the run itself hours rather than minutes — the one pass took 2h43m over
+   580 steps, and 0.0.7e's failure took 17.5 hours before it died.
 7. **SWE-bench under `--frame`.** Never run; 0.0.7 `--short` scored 3/7.
 8. **The two Design Tests (4.7).** Both are new probes rather than changes. The
    Turing test in particular is small: a tape on disk, a transition table the
@@ -833,6 +862,10 @@ needs an API key, which is why it is a list rather than a result.
 6. [0.0.7i](InfiniteAgent%200.0.7i.md) and
    [0.0.7j](InfiniteAgent%200.0.7j.md) — the two that set up 0.0.8, if you want
    the immediate history rather than all of it.
+7. [The Reconstruction Test](The%20Reconstruction%20Test.md) — the task every
+   letter of 0.0.7 was judged by, written down: how to build one for a version,
+   how to grade it, and the record of who has passed it. §5 item 6 is the one
+   0.0.8d owes.
 
 The git history is one commit per change with the evidence in the message; `git
 log --oneline` from the baseline (`b9a3a4c`) is a readable account of the

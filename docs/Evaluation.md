@@ -1,5 +1,9 @@
 # Evaluating InfiniteAgent on public benchmarks
 
+*This is the detail on three of the nine evaluations. [Standard
+Evaluations](Standard%20Evaluations.md) is the whole battery — the probes as
+well as these, what each grade checks, and what is missing.*
+
 The reconstruct task measures one job in depth. This measures the claim itself,
 on benchmarks whose ground truth someone else established: **can a fixed, small
 active context do work whose material is arbitrarily larger than it?**

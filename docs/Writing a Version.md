@@ -58,6 +58,40 @@ Two rules that follow from it:
   one variable in it.
 
 
+## What "everything else" is
+
+[Standard Evaluations](Standard%20Evaluations.md) is the battery: the offline
+suite, the `width` and `volume` probes, the three public benchmarks, and the
+commands for each. Read it before writing §3 — it also records what each grade
+does *not* check, which is what a §3 criterion has to be written around, and
+which of them have no script yet.
+
+## The last test a version takes
+
+**If everything else a version set out to measure has passed, it attempts the
+[Reconstruction Test](The%20Reconstruction%20Test.md)** — the agent rebuilds that
+version of InfiniteAgent from a condensed specification of itself, in an empty
+directory, under that version's own geometry, and then runs what it built. That
+document is how to build the task for a new version and how to grade it; the
+short of it is one or two files that condense everything normative about the
+version, and a workspace with nothing else in it.
+
+It goes last because it is the expensive one — hours rather than minutes; the
+one pass took 2h43m and the longest failure 17.5 — and because it is not a
+measurement. The probes in `eval/benchmarks/` are twenty minutes each and each
+isolates one axis, so they are what a version is *tuned* against. This is the one that says whether the
+version works, on the only task that is long enough, wide enough and deep enough
+to be the claim in the [Design Tests](Design%20Tests%20(Top%20Down).md) rather
+than a component of it. A version whose probes all pass and which has not
+attempted it has not finished.
+
+In the five sections that means: **§3 names it** among the measurements, with the
+staging it will be given; **§4 reports the outcome** against the three gates, pass
+or fail, with the measures the test document's §3.4 lists; and **§5 says plainly
+that it was not attempted** if it was not, so the next version knows the claim is
+open. A failed reconstruction is a result — every letter of the 0.0.7 series was
+one — and the failure names the next change.
+
 ## Where results live
 
 Live-run trajectories are in `runs/`, which is gitignored, so a figure in §4
