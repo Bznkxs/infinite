@@ -335,6 +335,12 @@ For a version after 0.0.8d, the work is:
 4. **Run it (§3.1), grade it (§3.3), record it either way (§3.4)**, and add a row
    to §4.
 
+One more thing 0.0.8e adds to §3.4's list, because it cost that run a result:
+**check what the stall measure is comparing.** A verdict line that embeds a
+per-step result path makes every step of a red-check frame look like progress,
+which left the measure inert for seven of 0.0.8d's eight agents before anyone
+noticed (0.0.8e §2.6).
+
 The one thing not to do is reuse a workspace. Every run is a fresh directory: a
 compiled module or a stale `.scratch` from an earlier attempt is a fact the new
 run did not pay for, and `width`'s `materialise` strips `__pycache__` for exactly
