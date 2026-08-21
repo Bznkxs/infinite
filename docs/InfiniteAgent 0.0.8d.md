@@ -370,6 +370,19 @@ already being patched, so I should verify what state that's in before making
 changes"*. Every step re-derived the same diagnosis and bought one more read
 before acting.
 
+#### A correction, found later: the measure worked here by accident
+
+**0.0.8e §2.6 found that a *failing* check was counted as progress**, because
+`Progress` compared the verdict line and that line ends in a per-step result
+path. The root above had **no check**, so its 103 stalls are real. Its children
+did, and were red for most of their lives, so their near-zero stall counts —
+`404a2f38`, 120 steps and **one** stall — are the artefact rather than health.
+
+Two things in this document have to be read with that in mind: **§5's `width`
+stall rates (5.6%, 8.5%, 4.8%) are largely the artefact**, and the livelock
+below was caught only because the root was unchecked — which is the same setup
+error §10.1 criticises. Tier 1 is confirmed on that root and on nothing else.
+
 #### The loop is invisible to a repetition detector, and this is the proof
 
 §3 argued that re-reading predicts nothing, off five arms of one probe. This run
