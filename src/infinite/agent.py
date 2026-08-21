@@ -283,6 +283,16 @@ class Agent:
         #: The verdict the next dump will carry, and the step it is from, so a
         #: response landing in the same step reuses it rather than paying twice.
         self._check_line: str | None = None
+        #: The same verdict as the *decision* rather than as the line the agent
+        #: reads — the exit code and the failing message, with no result-file
+        #: path in it. `_check_line` names `tool_output/<id>-step<NNN>-…json`,
+        #: which is a different string every step, so a frame whose check was
+        #: failing counted as having made progress on every step of the run it
+        #: was stuck in. That is precisely the state the measure exists for:
+        #: 0.0.8d's reconstruction root stalled 103 of 120 steps and its child
+        #: stalled 1 of 120, and the only difference between them was that the
+        #: child had a check and it was red.
+        self._check_state: str | None = None
         self._check_step = -1
         #: Set when the check turned out to be too slow to be a heartbeat.
         self._check_is_slow = False
@@ -1256,6 +1266,8 @@ class Agent:
             if code == 0
             else f"FAILS (exit {code}): {first} — {display}"
         )
+        # What the *measure* compares: the decision, without the per-step path.
+        self._check_state = "passes" if code == 0 else f"exit {code}: {first}"
         logger.info(
             "agent %s step %d: check %s",
             self.agent_id, self.step, "passed" if code == 0 else f"failed (exit {code})",
@@ -1325,7 +1337,7 @@ class Agent:
         """
         progress = record["progress"] = self.progress.record(
             target=self.registers.values[TARGET_REGISTER],
-            check=self._check_line,
+            check=self._check_state,
         )
         # 0.0.8e §2.2/§2.4: what the step read, and how long the run has been
         # where it is. Recorded after `Progress`, because the window it keeps
@@ -1333,7 +1345,7 @@ class Agent:
         self.ledger.record(
             step=self.step,
             moved=progress["moved"],
-            check=self._check_line,
+            check=self._check_state,
             paths=read_paths(results, self.progress.known()),
         )
         record["ledger"] = self.ledger.summary()

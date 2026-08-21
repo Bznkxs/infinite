@@ -44,8 +44,10 @@ thing to try rather than this.
 
 ## 2. What it modifies
 
-Five changes. Four are the mechanism; the fifth is a removal the operator asked
-for and it is the one with a case against it (§2.5).
+Six changes. Four are the mechanism, the fifth is a removal the operator asked
+for and is the one with a case against it (§2.5), and the sixth is a defect found
+mid-run that made the previous version's measure inert wherever it mattered
+(§2.6).
 
 ### 2.1 The summariser is told what the step changed — `summary.py`, `agent.py`
 
@@ -124,6 +126,48 @@ next result attributable: if the ledger works, it worked without a memo table.
 
 That is the reasoning, and §4 should be read knowing that a 0.0.8e regression on
 `width` is as likely to be this removal as anything else in §2.
+
+### 2.6 A failing check was counted as progress — `agent.py`
+
+*Found while the first 0.0.8e run was in flight, and it invalidated that run.
+Recorded here rather than in §4 because it is a change, not a result.*
+
+`Progress` counts a changed check verdict as progress, which is right: an import
+that starts working is the run getting somewhere. What it **compared** was the
+line the agent reads, and that line ends in the result file of the run that
+produced it — `tool_output/<id>-step041-0362-check.json`, a different string
+every step.
+
+So a frame whose check was red counted as having made progress on **every step**
+of the loop it was stuck in. The measure was inert in exactly the state it exists
+for. A passing check was never affected, because it renders the constant
+`passes.`
+
+The 0.0.8d reconstruction is the evidence and it is not subtle:
+
+| agent | | steps | stalls | check verdict changed |
+| --- | --- | ---: | ---: | ---: |
+| `f2bd5386` | root, **no check** | 120 | **103** | 0 |
+| `404a2f38` | child, **red check** | 120 | **1** | 119 |
+
+Two things follow, and both are corrections to the previous version rather than
+to this one:
+
+- **0.0.8d §5.1's livelock was caught only because that root had no check.** The
+  measure worked there by accident, and the accident was the setup error §10.1
+  of that document criticises. Tier 1 is confirmed on that root and on nothing
+  else.
+- **0.0.8d §5's `width` stall rates — 5.6%, 8.5%, 4.8% — are largely this
+  artefact**, since every frame in those runs had a check and spent most of its
+  life red. They should not be read as evidence that anything was healthy.
+
+The fix is to compare the *decision* rather than the display: `_check_state` is
+`"passes"` or `"exit 3: <first failing line>"`, with no per-step path in it. The
+agent still reads the line with the path, because the path is what it opens.
+
+`test_check_progress.py` is the regression, and it asserts the shape directly: a
+run of six steps that does nothing, under a check that always fails, must record
+six stalls.
 
 ## 3. What to evaluate
 
